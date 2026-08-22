@@ -60,6 +60,7 @@ model BalanceAdjustment {
 }
 
 model StaffingRule {
-  id       String @id @default(cuid())
-  minStaff Int    @default(1)
+  id         String @id @default(cuid())
+  department String @unique
+  minStaff   Int    @default(1)
 }

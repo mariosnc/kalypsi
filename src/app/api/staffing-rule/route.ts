@@ -6,10 +6,28 @@ export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Μη εξουσιοδοτημένος." }, { status: 401 });
 
-  let rule = await prisma.staffingRule.findFirst();
-  if (!rule) rule = await prisma.staffingRule.create({ data: { minStaff: 1 } });
+  const employees = await prisma.user.findMany({
+    where: { role: "EMPLOYEE", department: { not: null } },
+    select: { department: true },
+    distinct: ["department"],
+  });
+  const departments = employees.map((e) => e.department as string).sort();
 
-  return NextResponse.json(rule);
+  // make sure every department that has employees has a rule row (default 1)
+  for (const dep of departments) {
+    await prisma.staffingRule.upsert({
+      where: { department: dep },
+      update: {},
+      create: { department: dep, minStaff: 1 },
+    });
+  }
+
+  const rules = await prisma.staffingRule.findMany({
+    where: { department: { in: departments } },
+    orderBy: { department: "asc" },
+  });
+
+  return NextResponse.json(rules);
 }
 
 export async function PUT(req: NextRequest) {
@@ -18,17 +36,16 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να το αλλάξει." }, { status: 403 });
   }
 
-  const { minStaff } = await req.json();
-  if (typeof minStaff !== "number" || minStaff < 0) {
-    return NextResponse.json({ error: "Μη έγκυρη τιμή." }, { status: 400 });
+  const { department, minStaff } = await req.json();
+  if (!department || typeof minStaff !== "number" || minStaff < 0) {
+    return NextResponse.json({ error: "Μη έγκυρα δεδομένα." }, { status: 400 });
   }
 
-  let rule = await prisma.staffingRule.findFirst();
-  if (!rule) {
-    rule = await prisma.staffingRule.create({ data: { minStaff } });
-  } else {
-    rule = await prisma.staffingRule.update({ where: { id: rule.id }, data: { minStaff } });
-  }
+  const rule = await prisma.staffingRule.upsert({
+    where: { department },
+    update: { minStaff },
+    create: { department, minStaff },
+  });
 
   return NextResponse.json(rule);
 }

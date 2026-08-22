@@ -13,7 +13,8 @@ type PendingReq = {
   user: { id: string; name: string; department: string | null; balanceHours: number };
 };
 type RosterRow = { id: string; name: string; department: string | null; onLeave: boolean };
-type CoverageDay = { date: string; available: number };
+type CoverageDay = { date: string; byDept: Record<string, number> };
+type StaffingRuleRow = { id: string; department: string; minStaff: number };
 type EmployeeRow = { id: string; name: string; email: string; department: string | null; balanceHours: number };
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
@@ -23,7 +24,7 @@ export default function AdminPage() {
   const router = useRouter();
   const [tab, setTab] = useState<"pending" | "roster" | "balances" | "new">("pending");
   const [pending, setPending] = useState<PendingReq[]>([]);
-  const [minStaff, setMinStaff] = useState(1);
+  const [rules, setRules] = useState<StaffingRuleRow[]>([]);
   const [coverage, setCoverage] = useState<CoverageDay[]>([]);
   const [rosterDate, setRosterDate] = useState(todayISO());
   const [roster, setRoster] = useState<{ working: number; total: number; roster: RosterRow[] } | null>(null);
@@ -45,9 +46,9 @@ export default function AdminPage() {
     if (res.ok) setPending(await res.json());
   }, []);
 
-  const loadRule = useCallback(async () => {
+  const loadRules = useCallback(async () => {
     const res = await fetch("/api/staffing-rule");
-    if (res.ok) setMinStaff((await res.json()).minStaff);
+    if (res.ok) setRules(await res.json());
   }, []);
 
   const loadCoverage = useCallback(async () => {
@@ -68,9 +69,9 @@ export default function AdminPage() {
 
   useEffect(() => {
     loadPending();
-    loadRule();
+    loadRules();
     loadCoverage();
-  }, [loadPending, loadRule, loadCoverage]);
+  }, [loadPending, loadRules, loadCoverage]);
 
   useEffect(() => {
     if (tab === "roster") loadRoster(rosterDate);
@@ -90,12 +91,12 @@ export default function AdminPage() {
     loadCoverage();
   }
 
-  async function updateMinStaff(v: number) {
-    setMinStaff(v);
+  async function updateMinStaff(department: string, v: number) {
+    setRules((rs) => rs.map((r) => (r.department === department ? { ...r, minStaff: v } : r)));
     await fetch("/api/staffing-rule", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ minStaff: v }),
+      body: JSON.stringify({ department, minStaff: v }),
     });
   }
 
@@ -147,7 +148,8 @@ export default function AdminPage() {
     router.push("/login");
   }
 
-  const coverageForDate = (iso: string) => coverage.find((c) => c.date === iso)?.available;
+  const coverageForDate = (iso: string, dept: string) => coverage.find((c) => c.date === iso)?.byDept?.[dept];
+  const minStaffForDept = (dept: string) => rules.find((r) => r.department === dept)?.minStaff ?? 0;
 
   return (
     <div className="max-w-4xl mx-auto px-5 py-6 space-y-5">
@@ -179,16 +181,25 @@ export default function AdminPage() {
 
       {tab === "pending" && (
         <div className="space-y-3">
-          <div className="no-print flex items-center gap-2 text-sm bg-white rounded-xl border border-ink/10 p-3 w-fit">
-            <Users size={15} className="text-ink/50" />
-            <span className="text-ink/50">Ελάχιστο προσωπικό / ημέρα</span>
-            <input
-              type="number"
-              min={0}
-              value={minStaff}
-              onChange={(e) => updateMinStaff(Number(e.target.value))}
-              className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono"
-            />
+          <div className="no-print bg-white rounded-xl border border-ink/10 p-3 w-fit">
+            <div className="flex items-center gap-2 text-sm text-ink/50 mb-2">
+              <Users size={15} /> Ελάχιστο προσωπικό / ημέρα ανά τμήμα
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {rules.map((r) => (
+                <label key={r.department} className="flex items-center gap-2 text-sm">
+                  <span className="text-ink/70">{r.department}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={r.minStaff}
+                    onChange={(e) => updateMinStaff(r.department, Number(e.target.value))}
+                    className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono"
+                  />
+                </label>
+              ))}
+              {rules.length === 0 && <span className="text-sm text-ink/40">Δεν υπάρχουν ακόμα τμήματα με υπαλλήλους.</span>}
+            </div>
           </div>
 
           {pending.length === 0 && (
@@ -199,6 +210,8 @@ export default function AdminPage() {
 
           {pending.map((r) => {
             const afterBalance = (r.user.balanceHours - r.hours) / 8;
+            const dept = r.user.department || "Χωρίς τμήμα";
+            const minStaff = minStaffForDept(dept);
             const shortage: string[] = [];
             let cur = new Date(r.startDate);
             const endD = new Date(r.endDate);
@@ -206,7 +219,7 @@ export default function AdminPage() {
               const iso = cur.toISOString().slice(0, 10);
               const dow = cur.getUTCDay();
               if (dow !== 0 && dow !== 6) {
-                const avail = coverageForDate(iso);
+                const avail = coverageForDate(iso, dept);
                 if (avail !== undefined && avail - 1 < minStaff) shortage.push(fmt(iso));
               }
               cur.setUTCDate(cur.getUTCDate() + 1);
@@ -216,7 +229,7 @@ export default function AdminPage() {
               <div key={r.id} className="bg-white rounded-xl border border-ink/10 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="font-medium">{r.user.name}</div>
+                    <div className="font-medium">{r.user.name} <span className="text-xs font-normal text-ink/40">· {dept}</span></div>
                     <div className="text-sm text-ink/50">
                       {fmt(r.startDate)} – {fmt(r.endDate)} · <span className="font-mono">{r.hours} ώρες</span> ·
                       υπόλοιπο μετά: <span className="font-mono">{afterBalance.toFixed(1)}μ</span>
@@ -240,7 +253,7 @@ export default function AdminPage() {
                 {shortage.length > 0 && (
                   <div className="mt-3 flex items-start gap-2 text-xs bg-amber/10 text-[#8f5620] rounded-lg p-2.5">
                     <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                    <span>Αν εγκριθεί, η κάλυψη πέφτει κάτω από το ελάχιστο ({minStaff}) στις: {shortage.join(", ")}</span>
+                    <span>Αν εγκριθεί, η κάλυψη του τμήματος «{dept}» πέφτει κάτω από το ελάχιστο ({minStaff}) στις: {shortage.join(", ")}</span>
                   </div>
                 )}
               </div>
