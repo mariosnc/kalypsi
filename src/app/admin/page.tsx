@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays } from "lucide-react";
+import { CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays, UserPlus } from "lucide-react";
 
 type PendingReq = {
   id: string;
@@ -14,20 +14,30 @@ type PendingReq = {
 };
 type RosterRow = { id: string; name: string; department: string | null; onLeave: boolean };
 type CoverageDay = { date: string; available: number };
+type EmployeeRow = { id: string; name: string; email: string; department: string | null; balanceHours: number };
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "roster" | "balances">("pending");
+  const [tab, setTab] = useState<"pending" | "roster" | "balances" | "new">("pending");
   const [pending, setPending] = useState<PendingReq[]>([]);
   const [minStaff, setMinStaff] = useState(1);
   const [coverage, setCoverage] = useState<CoverageDay[]>([]);
   const [rosterDate, setRosterDate] = useState(todayISO());
   const [roster, setRoster] = useState<{ working: number; total: number; roster: RosterRow[] } | null>(null);
-  const [employees, setEmployees] = useState<{ id: string; name: string; balanceHours: number }[]>([]);
+  const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [adjustAmt, setAdjustAmt] = useState<Record<string, string>>({});
+
+  // new employee form state
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newDept, setNewDept] = useState("");
+  const [newBalanceDays, setNewBalanceDays] = useState("20");
+  const [newError, setNewError] = useState("");
+  const [newSuccess, setNewSuccess] = useState("");
 
   const loadPending = useCallback(async () => {
     const res = await fetch("/api/requests?status=PENDING");
@@ -100,6 +110,35 @@ export default function AdminPage() {
     loadEmployees();
   }
 
+  async function createEmployee(e: React.FormEvent) {
+    e.preventDefault();
+    setNewError("");
+    setNewSuccess("");
+    const res = await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: newName,
+        email: newEmail,
+        password: newPassword,
+        department: newDept,
+        balanceDays: newBalanceDays,
+      }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNewError(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    setNewSuccess(`Ο/Η ${newName} προστέθηκε. Δώσε του/της email: ${newEmail} και τον κωδικό που όρισες.`);
+    setNewName("");
+    setNewEmail("");
+    setNewPassword("");
+    setNewDept("");
+    setNewBalanceDays("20");
+    loadEmployees();
+  }
+
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
@@ -116,11 +155,12 @@ export default function AdminPage() {
         </button>
       </header>
 
-      <div className="no-print flex gap-2">
+      <div className="no-print flex gap-2 flex-wrap">
         {[
           ["pending", `Εκκρεμείς (${pending.length})`],
           ["roster", "Ημερήσια κατάσταση"],
           ["balances", "Υπόλοιπα"],
+          ["new", "Νέος υπάλληλος"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -156,7 +196,6 @@ export default function AdminPage() {
 
           {pending.map((r) => {
             const afterBalance = (r.user.balanceHours - r.hours) / 8;
-            // days in range whose coverage - 1 (this approval) would fall below minStaff
             const shortage: string[] = [];
             let cur = new Date(r.startDate);
             const endD = new Date(r.endDate);
@@ -264,6 +303,7 @@ export default function AdminPage() {
             <div key={e.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="font-medium">{e.name}</div>
+                <div className="text-xs text-ink/40">{e.email}</div>
                 <div className="text-sm text-ink/50 font-mono">
                   {(e.balanceHours / 8).toFixed(1)} ημέρες · {e.balanceHours} ώρες
                 </div>
@@ -284,6 +324,39 @@ export default function AdminPage() {
           ))}
           {employees.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
         </div>
+      )}
+
+      {tab === "new" && (
+        <form onSubmit={createEmployee} className="bg-white rounded-xl border border-ink/10 p-5 max-w-md space-y-4">
+          <div className="font-disp text-lg flex items-center gap-2">
+            <UserPlus size={20} /> Νέος υπάλληλος
+          </div>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Ονοματεπώνυμο</div>
+            <input required value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Email (θα το χρησιμοποιεί για σύνδεση)</div>
+            <input required type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="name@company.gr" />
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Αρχικός κωδικός (πες του τον, μπορεί να τον αλλάξει αργότερα)</div>
+            <input required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="τουλάχιστον 6 χαρακτήρες" />
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Τμήμα (προαιρετικό)</div>
+            <input value={newDept} onChange={(e) => setNewDept(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Αρχικό υπόλοιπο άδειας (ημέρες)</div>
+            <input type="number" step="0.5" value={newBalanceDays} onChange={(e) => setNewBalanceDays(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+          </label>
+          {newError && <div className="text-sm text-brick">{newError}</div>}
+          {newSuccess && <div className="text-sm text-teal">{newSuccess}</div>}
+          <button type="submit" className="w-full bg-teal text-white rounded-lg py-2.5 font-medium">
+            Δημιουργία λογαριασμού
+          </button>
+        </form>
       )}
     </div>
   );
