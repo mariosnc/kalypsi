@@ -36,6 +36,7 @@ export default function AdminPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newDept, setNewDept] = useState("");
   const [newBalanceDays, setNewBalanceDays] = useState("20");
+  const [newRole, setNewRole] = useState<"EMPLOYEE" | "ADMIN">("EMPLOYEE");
   const [newError, setNewError] = useState("");
   const [newSuccess, setNewSuccess] = useState("");
 
@@ -123,6 +124,7 @@ export default function AdminPage() {
         password: newPassword,
         department: newDept,
         balanceDays: newBalanceDays,
+        role: newRole,
       }),
     });
     if (!res.ok) {
@@ -130,12 +132,13 @@ export default function AdminPage() {
       setNewError(data.error || "Κάτι πήγε στραβά.");
       return;
     }
-    setNewSuccess(`Ο/Η ${newName} προστέθηκε. Δώσε του/της email: ${newEmail} και τον κωδικό που όρισες.`);
+    setNewSuccess(`Ο/Η ${newName} προστέθηκε ως ${newRole === "ADMIN" ? "διαχειριστής" : "υπάλληλος"}. Δώσε του/της email: ${newEmail} και τον κωδικό που όρισες.`);
     setNewName("");
     setNewEmail("");
     setNewPassword("");
     setNewDept("");
     setNewBalanceDays("20");
+    setNewRole("EMPLOYEE");
     loadEmployees();
   }
 
@@ -342,6 +345,13 @@ export default function AdminPage() {
           <label className="block text-sm">
             <div className="text-ink/50 mb-1">Αρχικός κωδικός (πες του τον, μπορεί να τον αλλάξει αργότερα)</div>
             <input required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="τουλάχιστον 6 χαρακτήρες" />
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Ρόλος</div>
+            <select value={newRole} onChange={(e) => setNewRole(e.target.value as "EMPLOYEE" | "ADMIN")} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+              <option value="EMPLOYEE">Υπάλληλος</option>
+              <option value="ADMIN">Διαχειριστής</option>
+            </select>
           </label>
           <label className="block text-sm">
             <div className="text-ink/50 mb-1">Τμήμα (προαιρετικό)</div>

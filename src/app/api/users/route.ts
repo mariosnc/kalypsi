@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να προσθέσει υπάλληλο." }, { status: 403 });
   }
 
-  const { name, email, password, department, balanceDays } = await req.json();
+  const { name, email, password, department, balanceDays, role } = await req.json();
 
   if (!name || !email || !password) {
     return NextResponse.json({ error: "Λείπει όνομα, email ή κωδικός." }, { status: 400 });
@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
   if (password.length < 6) {
     return NextResponse.json({ error: "Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες." }, { status: 400 });
   }
+  const finalRole = role === "ADMIN" ? "ADMIN" : "EMPLOYEE";
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
       passwordHash,
       department: department || null,
       balanceHours,
-      role: "EMPLOYEE",
+      role: finalRole,
     },
   });
 
