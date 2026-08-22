@@ -339,8 +339,8 @@ export default function AdminPage() {
             <input required value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
           </label>
           <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Email (θα το χρησιμοποιεί για σύνδεση)</div>
-            <input required type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="name@company.gr" />
+            <div className="text-ink/50 mb-1">Όνομα χρήστη</div>
+            <input required value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="π.χ. eleni" autoCapitalize="none" autoCorrect="off" />
           </label>
           <label className="block text-sm">
             <div className="text-ink/50 mb-1">Αρχικός κωδικός (πες του τον, μπορεί να τον αλλάξει αργότερα)</div>
