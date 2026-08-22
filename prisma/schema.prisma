@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  EMPLOYEE
+  ADMIN
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(EMPLOYEE)
+  department   String?
+  balanceHours Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  requests    LeaveRequest[]
+  adjustments BalanceAdjustment[]
+}
+
+model LeaveRequest {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  startDate DateTime
+  endDate   DateTime
+  hours     Int
+  status    RequestStatus @default(PENDING)
+  decidedAt DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+model BalanceAdjustment {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  hours     Int
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model StaffingRule {
+  id       String @id @default(cuid())
+  minStaff Int    @default(1)
+}
