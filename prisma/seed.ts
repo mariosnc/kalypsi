@@ -36,12 +36,10 @@ async function main() {
     });
   }
 
-  await prisma.staffingRule.deleteMany({});
-  await prisma.staffingRule.create({ data: { minStaff: 4 } });
-
   console.log("Seed ολοκληρώθηκε.");
   console.log("Admin login: admin@company.gr / password123");
   console.log("Employee login (π.χ.): eleni@company.gr / password123");
+  console.log("Τα ελάχιστα προσωπικού ανά τμήμα δημιουργούνται αυτόματα με προεπιλογή 1 — άλλαξέ τα από το admin panel.");
 }
 
 main()
