@@ -17,10 +17,9 @@ export function workingDaysBetween(startISO: string, endISO: string): number {
   return count;
 }
 
-// Ώρες άδειας ανά ημέρα: Δευτέρα = 10 ώρες, Τρίτη–Παρασκευή = 11 ώρες, Σαββατοκύριακο = 0
+// Ώρες άδειας ανά ημέρα: Δευτέρα = 10 ώρες, όλες οι υπόλοιπες μέρες (και Σαββατοκύριακο) = 11 ώρες
 export function hoursForDate(d: Date): number {
   const day = d.getUTCDay(); // 0=Κυριακή, 1=Δευτέρα, ... 6=Σάββατο
-  if (day === 0 || day === 6) return 0;
   if (day === 1) return 10;
   return 11;
 }

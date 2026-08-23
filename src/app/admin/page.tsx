@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays, UserPlus, KeyRound } from "lucide-react";
+import { CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays, UserPlus, KeyRound, Stethoscope, GraduationCap, Trash2 } from "lucide-react";
 
 type PendingReq = {
   id: string;
@@ -14,8 +14,9 @@ type PendingReq = {
 };
 type RosterRow = { id: string; name: string; department: string | null; onLeave: boolean };
 type CoverageDay = { date: string; byDept: Record<string, number> };
-type StaffingRuleRow = { id: string; department: string; minStaff: number };
+type StaffingRuleRow = { id: string; department: string; totalForce: number };
 type EmployeeRow = { id: string; name: string; email: string; department: string | null; balanceHours: number };
+type AbsenceRow = { id: string; department: string; type: "DOCTOR" | "TRAINING"; count: number; startDate: string; endDate: string };
 
 const DEPARTMENTS = ["Μονιάτης", "Πελένδρι", "Αγρός", "Εφταγώνια", "Πάχνα", "Κυβίδες"];
 
@@ -24,7 +25,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "roster" | "balances" | "new">("pending");
+  const [tab, setTab] = useState<"pending" | "roster" | "balances" | "new" | "absences">("pending");
   const [pending, setPending] = useState<PendingReq[]>([]);
   const [rules, setRules] = useState<StaffingRuleRow[]>([]);
   const [coverage, setCoverage] = useState<CoverageDay[]>([]);
@@ -34,6 +35,14 @@ export default function AdminPage() {
   const [adjustAmt, setAdjustAmt] = useState<Record<string, string>>({});
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+
+  const [absences, setAbsences] = useState<AbsenceRow[]>([]);
+  const [absDept, setAbsDept] = useState(DEPARTMENTS[0]);
+  const [absType, setAbsType] = useState<"DOCTOR" | "TRAINING">("DOCTOR");
+  const [absCount, setAbsCount] = useState("1");
+  const [absStart, setAbsStart] = useState(todayISO());
+  const [absEnd, setAbsEnd] = useState(todayISO());
+  const [absError, setAbsError] = useState("");
 
   const [showPassword, setShowPassword] = useState(false);
   const [curPass, setCurPass] = useState("");
@@ -76,6 +85,11 @@ export default function AdminPage() {
     if (res.ok) setEmployees(await res.json());
   }, []);
 
+  const loadAbsences = useCallback(async () => {
+    const res = await fetch("/api/absences");
+    if (res.ok) setAbsences(await res.json());
+  }, []);
+
   useEffect(() => {
     loadPending();
     loadRules();
@@ -90,6 +104,10 @@ export default function AdminPage() {
     if (tab === "balances") loadEmployees();
   }, [tab, loadEmployees]);
 
+  useEffect(() => {
+    if (tab === "absences") loadAbsences();
+  }, [tab, loadAbsences]);
+
   async function decide(id: string, decision: "APPROVED" | "REJECTED", reason?: string) {
     await fetch(`/api/requests/${id}/decision`, {
       method: "POST",
@@ -102,13 +120,14 @@ export default function AdminPage() {
     loadCoverage();
   }
 
-  async function updateMinStaff(department: string, v: number) {
-    setRules((rs) => rs.map((r) => (r.department === department ? { ...r, minStaff: v } : r)));
+  async function updateTotalForce(department: string, v: number) {
+    setRules((rs) => rs.map((r) => (r.department === department ? { ...r, totalForce: v } : r)));
     await fetch("/api/staffing-rule", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ department, minStaff: v }),
+      body: JSON.stringify({ department, totalForce: v }),
     });
+    loadCoverage();
   }
 
   async function applyAdjust(userId: string) {
@@ -121,6 +140,30 @@ export default function AdminPage() {
     });
     setAdjustAmt((a) => ({ ...a, [userId]: "" }));
     loadEmployees();
+  }
+
+  async function addAbsence(e: React.FormEvent) {
+    e.preventDefault();
+    setAbsError("");
+    const res = await fetch("/api/absences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ department: absDept, type: absType, count: absCount, startDate: absStart, endDate: absEnd }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setAbsError(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    setAbsCount("1");
+    loadAbsences();
+    loadCoverage();
+  }
+
+  async function removeAbsence(id: string) {
+    await fetch(`/api/absences/${id}`, { method: "DELETE" });
+    loadAbsences();
+    loadCoverage();
   }
 
   async function createEmployee(e: React.FormEvent) {
@@ -179,7 +222,6 @@ export default function AdminPage() {
   }
 
   const coverageForDate = (iso: string, dept: string) => coverage.find((c) => c.date === iso)?.byDept?.[dept];
-  const minStaffForDept = (dept: string) => rules.find((r) => r.department === dept)?.minStaff ?? 0;
 
   return (
     <div className="max-w-4xl mx-auto px-5 py-6 space-y-5">
@@ -217,6 +259,7 @@ export default function AdminPage() {
           ["pending", `Εκκρεμείς (${pending.length})`],
           ["roster", "Ημερήσια κατάσταση"],
           ["balances", "Υπόλοιπα"],
+          ["absences", "Ιατρού / Εκπαίδευση"],
           ["new", "Νέος υπάλληλος"],
         ].map(([key, label]) => (
           <button
@@ -235,7 +278,7 @@ export default function AdminPage() {
         <div className="space-y-3">
           <div className="no-print bg-white rounded-xl border border-ink/10 p-3 w-fit">
             <div className="flex items-center gap-2 text-sm text-ink/50 mb-2">
-              <Users size={15} /> Ελάχιστο προσωπικό / ημέρα ανά τμήμα
+              <Users size={15} /> Δύναμη (σύνολο υπαλλήλων) ανά τμήμα
             </div>
             <div className="flex flex-wrap gap-3">
               {rules.map((r) => (
@@ -244,8 +287,8 @@ export default function AdminPage() {
                   <input
                     type="number"
                     min={0}
-                    value={r.minStaff}
-                    onChange={(e) => updateMinStaff(r.department, Number(e.target.value))}
+                    value={r.totalForce}
+                    onChange={(e) => updateTotalForce(r.department, Number(e.target.value))}
                     className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono"
                   />
                 </label>
@@ -263,17 +306,13 @@ export default function AdminPage() {
           {pending.map((r) => {
             const afterBalance = r.user.balanceHours - r.hours;
             const dept = r.user.department || "Χωρίς τμήμα";
-            const minStaff = minStaffForDept(dept);
             const shortage: string[] = [];
             let cur = new Date(r.startDate);
             const endD = new Date(r.endDate);
             while (cur <= endD) {
               const iso = cur.toISOString().slice(0, 10);
-              const dow = cur.getUTCDay();
-              if (dow !== 0 && dow !== 6) {
-                const avail = coverageForDate(iso, dept);
-                if (avail !== undefined && avail - 1 < minStaff) shortage.push(fmt(iso));
-              }
+              const avail = coverageForDate(iso, dept);
+              if (avail !== undefined && avail - 1 < 0) shortage.push(fmt(iso));
               cur.setUTCDate(cur.getUTCDate() + 1);
             }
 
@@ -321,7 +360,7 @@ export default function AdminPage() {
                 {shortage.length > 0 && (
                   <div className="mt-3 flex items-start gap-2 text-xs bg-amber/10 text-[#8f5620] rounded-lg p-2.5">
                     <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                    <span>Αν εγκριθεί, η κάλυψη του τμήματος «{dept}» πέφτει κάτω από το ελάχιστο ({minStaff}) στις: {shortage.join(", ")}</span>
+                    <span>Αν εγκριθεί, η κάλυψη του τμήματος «{dept}» πέφτει κάτω από το διαθέσιμο στις: {shortage.join(", ")}</span>
                   </div>
                 )}
               </div>
@@ -407,6 +446,62 @@ export default function AdminPage() {
             </div>
           ))}
           {employees.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
+        </div>
+      )}
+
+      {tab === "absences" && (
+        <div className="space-y-4">
+          <form onSubmit={addAbsence} className="bg-white rounded-xl border border-ink/10 p-5 space-y-3">
+            <div className="font-disp text-lg">Νέα απουσία (ιατρού / εκπαίδευση)</div>
+            <div className="flex flex-wrap gap-3">
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Τμήμα</div>
+                <select value={absDept} onChange={(e) => setAbsDept(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                  {DEPARTMENTS.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Τύπος</div>
+                <select value={absType} onChange={(e) => setAbsType(e.target.value as "DOCTOR" | "TRAINING")} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                  <option value="DOCTOR">Άδεια ιατρού</option>
+                  <option value="TRAINING">Εκπαίδευση</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Αριθμός ατόμων</div>
+                <input type="number" min={1} value={absCount} onChange={(e) => setAbsCount(e.target.value)} className="w-24 border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Από</div>
+                <input type="date" value={absStart} onChange={(e) => setAbsStart(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Έως</div>
+                <input type="date" value={absEnd} onChange={(e) => setAbsEnd(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+            </div>
+            {absError && <div className="text-sm text-brick">{absError}</div>}
+            <button type="submit" className="bg-teal text-white rounded-lg px-4 py-2 text-sm font-medium">Προσθήκη</button>
+          </form>
+
+          <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+            {absences.length === 0 && <div className="p-4 text-sm text-ink/40">Δεν υπάρχουν καταχωρημένες απουσίες.</div>}
+            {absences.map((a) => (
+              <div key={a.id} className="p-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm">
+                  {a.type === "DOCTOR" ? <Stethoscope size={15} className="text-ink/40" /> : <GraduationCap size={15} className="text-ink/40" />}
+                  <span className="font-medium">{a.department}</span>
+                  <span className="text-ink/50">{a.type === "DOCTOR" ? "Άδεια ιατρού" : "Εκπαίδευση"} · {a.count} άτομα</span>
+                  <span className="text-ink/40 font-mono text-xs">{fmt(a.startDate)} – {fmt(a.endDate)}</span>
+                </div>
+                <button onClick={() => removeAbsence(a.id)} className="text-ink/40 hover:text-brick">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

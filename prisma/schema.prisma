@@ -19,6 +19,11 @@ enum RequestStatus {
   REJECTED
 }
 
+enum AbsenceType {
+  DOCTOR
+  TRAINING
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -34,16 +39,16 @@ model User {
 }
 
 model LeaveRequest {
-  id               String        @id @default(cuid())
-  userId           String
-  user             User          @relation(fields: [userId], references: [id])
-  startDate        DateTime
-  endDate          DateTime
-  hours            Int
-  status           RequestStatus @default(PENDING)
-  rejectionReason  String?
-  decidedAt        DateTime?
-  createdAt        DateTime      @default(now())
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  startDate       DateTime
+  endDate         DateTime
+  hours           Int
+  status          RequestStatus @default(PENDING)
+  rejectionReason String?
+  decidedAt       DateTime?
+  createdAt       DateTime      @default(now())
 
   @@index([userId])
   @@index([status])
@@ -60,8 +65,22 @@ model BalanceAdjustment {
   @@index([userId])
 }
 
+// Δύναμη (συνολικός αριθμός υπαλλήλων) ανά τμήμα
 model StaffingRule {
   id         String @id @default(cuid())
   department String @unique
-  minStaff   Int    @default(1)
+  totalForce Int    @default(0)
+}
+
+// Άδειες ιατρού / εκπαίδευση: αφαιρούν άτομα από τη Δύναμη μόνο για συγκεκριμένη περίοδο
+model StaffAbsence {
+  id         String      @id @default(cuid())
+  department String
+  type       AbsenceType
+  count      Int
+  startDate  DateTime
+  endDate    DateTime
+  createdAt  DateTime    @default(now())
+
+  @@index([department])
 }

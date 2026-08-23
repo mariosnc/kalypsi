@@ -15,7 +15,6 @@ type Req = {
   rejectionReason?: string | null;
 };
 type CoverageDay = { date: string; byDept: Record<string, number> };
-type RuleRow = { department: string; minStaff: number };
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
 
@@ -61,14 +60,7 @@ export default function Dashboard() {
       months.add(start.slice(0, 7));
       months.add(end.slice(0, 7));
 
-      const [ruleRes, ...covResArr] = await Promise.all([
-        fetch("/api/staffing-rule"),
-        ...Array.from(months).map((m) => fetch(`/api/coverage?month=${m}`)),
-      ]);
-      if (!ruleRes.ok) return;
-      const rules: RuleRow[] = await ruleRes.json();
-      const minStaff = rules.find((r) => r.department === me.department)?.minStaff;
-      if (minStaff === undefined) return;
+      const covResArr = await Promise.all(Array.from(months).map((m) => fetch(`/api/coverage?month=${m}`)));
 
       let days: CoverageDay[] = [];
       for (const res of covResArr) {
@@ -79,12 +71,9 @@ export default function Dashboard() {
       const cur = new Date(start + "T00:00:00Z");
       const endD = new Date(end + "T00:00:00Z");
       while (cur <= endD) {
-        const dow = cur.getUTCDay();
-        if (dow !== 0 && dow !== 6) {
-          const iso = cur.toISOString().slice(0, 10);
-          const avail = days.find((d) => d.date === iso)?.byDept?.[me.department!];
-          if (avail !== undefined && avail - 1 < minStaff) conflictDays.push(fmt(iso));
-        }
+        const iso = cur.toISOString().slice(0, 10);
+        const avail = days.find((d) => d.date === iso)?.byDept?.[me.department!];
+        if (avail !== undefined && avail - 1 < 0) conflictDays.push(fmt(iso));
         cur.setUTCDate(cur.getUTCDate() + 1);
       }
 
@@ -223,7 +212,7 @@ export default function Dashboard() {
             </div>
           )}
           <div className="text-xs text-ink/40 mt-2">
-            Οι ώρες υπολογίζονται αυτόματα: 10 ώρες τη Δευτέρα, 11 ώρες Τρίτη–Παρασκευή, χωρίς Σαββατοκύριακα.
+            Οι ώρες υπολογίζονται αυτόματα: 10 ώρες τη Δευτέρα, 11 ώρες όλες τις άλλες ημέρες (και Σαββατοκύριακα).
           </div>
         </form>
       )}

@@ -13,12 +13,11 @@ export async function GET() {
   });
   const departments = employees.map((e) => e.department as string).sort();
 
-  // make sure every department that has employees has a rule row (default 1)
   for (const dep of departments) {
     await prisma.staffingRule.upsert({
       where: { department: dep },
       update: {},
-      create: { department: dep, minStaff: 1 },
+      create: { department: dep, totalForce: 0 },
     });
   }
 
@@ -36,15 +35,15 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να το αλλάξει." }, { status: 403 });
   }
 
-  const { department, minStaff } = await req.json();
-  if (!department || typeof minStaff !== "number" || minStaff < 0) {
+  const { department, totalForce } = await req.json();
+  if (!department || typeof totalForce !== "number" || totalForce < 0) {
     return NextResponse.json({ error: "Μη έγκυρα δεδομένα." }, { status: 400 });
   }
 
   const rule = await prisma.staffingRule.upsert({
     where: { department },
-    update: { minStaff },
-    create: { department, minStaff },
+    update: { totalForce },
+    create: { department, totalForce },
   });
 
   return NextResponse.json(rule);

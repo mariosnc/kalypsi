@@ -13,27 +13,25 @@ export async function GET(req: NextRequest) {
   const start = new Date(Date.UTC(year, mo - 1, 1));
   const end = new Date(Date.UTC(year, mo, 0));
 
-  const [employees, approved] = await Promise.all([
-    prisma.user.findMany({
-      where: { role: "EMPLOYEE" },
-      select: { id: true, department: true },
-    }),
+  const [rules, approved, absences] = await Promise.all([
+    prisma.staffingRule.findMany(),
     prisma.leaveRequest.findMany({
       where: { status: "APPROVED", startDate: { lte: end }, endDate: { gte: start } },
       select: { userId: true, startDate: true, endDate: true, user: { select: { department: true } } },
     }),
+    prisma.staffAbsence.findMany({
+      where: { startDate: { lte: end }, endDate: { gte: start } },
+    }),
   ]);
 
-  const departments = Array.from(new Set(employees.map((e) => e.department || "Χωρίς τμήμα"))).sort();
-  const totalByDept: Record<string, number> = {};
-  for (const e of employees) {
-    const d = e.department || "Χωρίς τμήμα";
-    totalByDept[d] = (totalByDept[d] || 0) + 1;
-  }
+  const departments = rules.map((r) => r.department).sort();
+  const totalForceByDept: Record<string, number> = {};
+  for (const r of rules) totalForceByDept[r.department] = r.totalForce;
 
   const days: { date: string; byDept: Record<string, number> }[] = [];
   const cur = new Date(start);
   while (cur <= end) {
+    // εγκεκριμένες άδειες εφαρμογής αυτή τη μέρα, ανά τμήμα
     const onLeaveByDept: Record<string, Set<string>> = {};
     for (const r of approved) {
       if (r.startDate <= cur && r.endDate >= cur) {
@@ -42,13 +40,21 @@ export async function GET(req: NextRequest) {
         onLeaveByDept[d].add(r.userId);
       }
     }
+    // απουσίες ιατρού/εκπαίδευσης αυτή τη μέρα, ανά τμήμα
+    const absentByDept: Record<string, number> = {};
+    for (const a of absences) {
+      if (a.startDate <= cur && a.endDate >= cur) {
+        absentByDept[a.department] = (absentByDept[a.department] || 0) + a.count;
+      }
+    }
+
     const byDept: Record<string, number> = {};
     for (const d of departments) {
-      byDept[d] = (totalByDept[d] || 0) - (onLeaveByDept[d]?.size || 0);
+      byDept[d] = (totalForceByDept[d] || 0) - (absentByDept[d] || 0) - (onLeaveByDept[d]?.size || 0);
     }
     days.push({ date: cur.toISOString().slice(0, 10), byDept });
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
 
-  return NextResponse.json({ departments, totalByDept, days });
+  return NextResponse.json({ departments, days });
 }
