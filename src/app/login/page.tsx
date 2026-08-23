@@ -46,7 +46,6 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full border border-ink/15 rounded-lg px-3 py-2"
-              placeholder="π.χ. eleni"
               autoCapitalize="none"
               autoCorrect="off"
             />
@@ -70,9 +69,6 @@ export default function LoginPage() {
             {loading ? "Σύνδεση..." : "Σύνδεση"}
           </button>
         </form>
-        <p className="text-xs text-ink/40 text-center mt-4">
-          Demo: admin@company.gr / eleni@company.gr — κωδικός: password123
-        </p>
       </div>
     </div>
   );

@@ -24,10 +24,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να προσθέσει χρήστη." }, { status: 403 });
   }
 
-  const { name, email, password, department, balanceDays, role } = await req.json();
+  const { name, email, password, department, balanceHours, role } = await req.json();
 
-  if (!name || !email || !password) {
-    return NextResponse.json({ error: "Λείπει όνομα, όνομα χρήστη ή κωδικός." }, { status: 400 });
+  if (!name || !email || !password || !department) {
+    return NextResponse.json({ error: "Λείπει όνομα, όνομα χρήστη, κωδικός ή τμήμα." }, { status: 400 });
   }
   if (password.length < 6) {
     return NextResponse.json({ error: "Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες." }, { status: 400 });
@@ -44,15 +44,14 @@ export async function POST(req: NextRequest) {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const balanceHours = Math.round(Number(balanceDays || 0) * 8);
 
   const user = await prisma.user.create({
     data: {
       name,
       email: username,
       passwordHash,
-      department: department || null,
-      balanceHours,
+      department,
+      balanceHours: Math.round(Number(balanceHours || 0)),
       role: finalRole,
     },
   });

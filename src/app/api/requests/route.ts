@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { workingDaysBetween } from "@/lib/date";
+import { computeLeaveHours } from "@/lib/date";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -31,11 +31,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Μη έγκυρο εύρος ημερομηνιών." }, { status: 400 });
   }
 
-  const days = workingDaysBetween(startDate, endDate);
-  if (days <= 0) {
+  const hours = computeLeaveHours(startDate, endDate);
+  if (hours <= 0) {
     return NextResponse.json({ error: "Το εύρος δεν περιέχει εργάσιμες ημέρες." }, { status: 400 });
   }
-  const hours = days * 8;
 
   const created = await prisma.leaveRequest.create({
     data: {

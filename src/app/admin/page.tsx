@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays, UserPlus } from "lucide-react";
+import { CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays, UserPlus, KeyRound } from "lucide-react";
 
 type PendingReq = {
   id: string;
@@ -17,6 +17,8 @@ type CoverageDay = { date: string; byDept: Record<string, number> };
 type StaffingRuleRow = { id: string; department: string; minStaff: number };
 type EmployeeRow = { id: string; name: string; email: string; department: string | null; balanceHours: number };
 
+const DEPARTMENTS = ["Μονιάτης", "Πελένδρι", "Αγρός", "Εφταγώνια", "Πάχνα", "Κυβίδες"];
+
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -30,13 +32,20 @@ export default function AdminPage() {
   const [roster, setRoster] = useState<{ working: number; total: number; roster: RosterRow[] } | null>(null);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [adjustAmt, setAdjustAmt] = useState<Record<string, string>>({});
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
-  // new employee form state
+  const [showPassword, setShowPassword] = useState(false);
+  const [curPass, setCurPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [passMsg, setPassMsg] = useState("");
+  const [passError, setPassError] = useState("");
+
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newDept, setNewDept] = useState("");
-  const [newBalanceDays, setNewBalanceDays] = useState("20");
+  const [newBalanceHours, setNewBalanceHours] = useState("160");
   const [newRole, setNewRole] = useState<"EMPLOYEE" | "ADMIN">("EMPLOYEE");
   const [newError, setNewError] = useState("");
   const [newSuccess, setNewSuccess] = useState("");
@@ -81,12 +90,14 @@ export default function AdminPage() {
     if (tab === "balances") loadEmployees();
   }, [tab, loadEmployees]);
 
-  async function decide(id: string, decision: "APPROVED" | "REJECTED") {
+  async function decide(id: string, decision: "APPROVED" | "REJECTED", reason?: string) {
     await fetch(`/api/requests/${id}/decision`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify({ decision, reason }),
     });
+    setRejectingId(null);
+    setRejectReason("");
     loadPending();
     loadCoverage();
   }
@@ -124,7 +135,7 @@ export default function AdminPage() {
         email: newEmail,
         password: newPassword,
         department: newDept,
-        balanceDays: newBalanceDays,
+        balanceHours: newBalanceHours,
         role: newRole,
       }),
     });
@@ -133,14 +144,33 @@ export default function AdminPage() {
       setNewError(data.error || "Κάτι πήγε στραβά.");
       return;
     }
-    setNewSuccess(`Ο/Η ${newName} προστέθηκε ως ${newRole === "ADMIN" ? "διαχειριστής" : "υπάλληλος"}. Δώσε του/της email: ${newEmail} και τον κωδικό που όρισες.`);
+    setNewSuccess(`Ο/Η ${newName} προστέθηκε ως ${newRole === "ADMIN" ? "διαχειριστής" : "υπάλληλος"}. Δώσε του/της όνομα χρήστη: ${newEmail} και τον κωδικό που όρισες.`);
     setNewName("");
     setNewEmail("");
     setNewPassword("");
     setNewDept("");
-    setNewBalanceDays("20");
+    setNewBalanceHours("160");
     setNewRole("EMPLOYEE");
-    loadEmployees();
+    loadRules();
+  }
+
+  async function changePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPassError("");
+    setPassMsg("");
+    const res = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword: curPass, newPassword: newPass }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setPassError(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    setPassMsg("Ο κωδικός άλλαξε επιτυχώς.");
+    setCurPass("");
+    setNewPass("");
   }
 
   async function logout() {
@@ -153,12 +183,34 @@ export default function AdminPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-5 py-6 space-y-5">
-      <header className="no-print flex items-center justify-between">
+      <header className="no-print flex items-center justify-between flex-wrap gap-3">
         <span className="font-disp text-2xl">Κάλυψη — Διαχειριστής</span>
-        <button onClick={logout} className="text-sm text-ink/50 flex items-center gap-1.5 hover:text-ink">
-          <LogOut size={14} /> Αποσύνδεση
-        </button>
+        <div className="flex items-center gap-4">
+          <button onClick={() => setShowPassword((s) => !s)} className="text-sm text-ink/50 flex items-center gap-1.5 hover:text-ink">
+            <KeyRound size={14} /> Αλλαγή κωδικού
+          </button>
+          <button onClick={logout} className="text-sm text-ink/50 flex items-center gap-1.5 hover:text-ink">
+            <LogOut size={14} /> Αποσύνδεση
+          </button>
+        </div>
       </header>
+
+      {showPassword && (
+        <form onSubmit={changePassword} className="no-print bg-white rounded-xl border border-ink/10 p-5 space-y-3 max-w-sm">
+          <div className="font-disp text-lg">Αλλαγή κωδικού</div>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Τρέχων κωδικός</div>
+            <input type="password" required value={curPass} onChange={(e) => setCurPass(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Νέος κωδικός</div>
+            <input type="password" required value={newPass} onChange={(e) => setNewPass(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+          </label>
+          {passError && <div className="text-sm text-brick">{passError}</div>}
+          {passMsg && <div className="text-sm text-teal">{passMsg}</div>}
+          <button type="submit" className="bg-ink text-white rounded-lg px-4 py-2 text-sm">Αποθήκευση</button>
+        </form>
+      )}
 
       <div className="no-print flex gap-2 flex-wrap">
         {[
@@ -209,7 +261,7 @@ export default function AdminPage() {
           )}
 
           {pending.map((r) => {
-            const afterBalance = (r.user.balanceHours - r.hours) / 8;
+            const afterBalance = r.user.balanceHours - r.hours;
             const dept = r.user.department || "Χωρίς τμήμα";
             const minStaff = minStaffForDept(dept);
             const shortage: string[] = [];
@@ -232,12 +284,12 @@ export default function AdminPage() {
                     <div className="font-medium">{r.user.name} <span className="text-xs font-normal text-ink/40">· {dept}</span></div>
                     <div className="text-sm text-ink/50">
                       {fmt(r.startDate)} – {fmt(r.endDate)} · <span className="font-mono">{r.hours} ώρες</span> ·
-                      υπόλοιπο μετά: <span className="font-mono">{afterBalance.toFixed(1)}μ</span>
+                      υπόλοιπο μετά: <span className="font-mono">{afterBalance} ώρες</span>
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => decide(r.id, "REJECTED")}
+                      onClick={() => setRejectingId(rejectingId === r.id ? null : r.id)}
                       className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-brick/30 text-brick hover:bg-brick/5"
                     >
                       <XCircle size={15} /> Απόρριψη
@@ -250,6 +302,22 @@ export default function AdminPage() {
                     </button>
                   </div>
                 </div>
+                {rejectingId === r.id && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <input
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      placeholder="Αιτιολόγηση απόρριψης (προαιρετικό)"
+                      className="flex-1 min-w-[200px] border border-ink/15 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <button
+                      onClick={() => decide(r.id, "REJECTED", rejectReason)}
+                      className="text-sm px-3 py-2 rounded-lg bg-brick text-white"
+                    >
+                      Επιβεβαίωση απόρριψης
+                    </button>
+                  </div>
+                )}
                 {shortage.length > 0 && (
                   <div className="mt-3 flex items-start gap-2 text-xs bg-amber/10 text-[#8f5620] rounded-lg p-2.5">
                     <AlertTriangle size={14} className="mt-0.5 shrink-0" />
@@ -321,7 +389,7 @@ export default function AdminPage() {
                 <div className="font-medium">{e.name}</div>
                 <div className="text-xs text-ink/40">{e.email}</div>
                 <div className="text-sm text-ink/50 font-mono">
-                  {(e.balanceHours / 8).toFixed(1)} ημέρες · {e.balanceHours} ώρες
+                  {e.balanceHours} ώρες · ≈{(e.balanceHours / 8).toFixed(1)} ημέρες
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -353,7 +421,7 @@ export default function AdminPage() {
           </label>
           <label className="block text-sm">
             <div className="text-ink/50 mb-1">Όνομα χρήστη</div>
-            <input required value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="π.χ. eleni" autoCapitalize="none" autoCorrect="off" />
+            <input required value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" autoCapitalize="none" autoCorrect="off" />
           </label>
           <label className="block text-sm">
             <div className="text-ink/50 mb-1">Αρχικός κωδικός (πες του τον, μπορεί να τον αλλάξει αργότερα)</div>
@@ -367,12 +435,17 @@ export default function AdminPage() {
             </select>
           </label>
           <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Τμήμα (προαιρετικό)</div>
-            <input value={newDept} onChange={(e) => setNewDept(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+            <div className="text-ink/50 mb-1">Τμήμα</div>
+            <select required value={newDept} onChange={(e) => setNewDept(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+              <option value="" disabled>Επίλεξε τμήμα</option>
+              {DEPARTMENTS.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
           </label>
           <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Αρχικό υπόλοιπο άδειας (ημέρες)</div>
-            <input type="number" step="0.5" value={newBalanceDays} onChange={(e) => setNewBalanceDays(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+            <div className="text-ink/50 mb-1">Αρχικό υπόλοιπο άδειας (ώρες)</div>
+            <input type="number" value={newBalanceHours} onChange={(e) => setNewBalanceHours(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
           </label>
           {newError && <div className="text-sm text-brick">{newError}</div>}
           {newSuccess && <div className="text-sm text-teal">{newSuccess}</div>}

@@ -34,15 +34,16 @@ model User {
 }
 
 model LeaveRequest {
-  id        String        @id @default(cuid())
-  userId    String
-  user      User          @relation(fields: [userId], references: [id])
-  startDate DateTime
-  endDate   DateTime
-  hours     Int
-  status    RequestStatus @default(PENDING)
-  decidedAt DateTime?
-  createdAt DateTime      @default(now())
+  id               String        @id @default(cuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id])
+  startDate        DateTime
+  endDate          DateTime
+  hours            Int
+  status           RequestStatus @default(PENDING)
+  rejectionReason  String?
+  decidedAt        DateTime?
+  createdAt        DateTime      @default(now())
 
   @@index([userId])
   @@index([status])

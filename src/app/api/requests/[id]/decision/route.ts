@@ -8,7 +8,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να αποφασίσει." }, { status: 403 });
   }
 
-  const { decision } = await req.json();
+  const { decision, reason } = await req.json();
   if (decision !== "APPROVED" && decision !== "REJECTED") {
     return NextResponse.json({ error: "Μη έγκυρη απόφαση." }, { status: 400 });
   }
@@ -22,7 +22,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.leaveRequest.update({
       where: { id: params.id },
-      data: { status: decision, decidedAt: new Date() },
+      data: {
+        status: decision,
+        decidedAt: new Date(),
+        rejectionReason: decision === "REJECTED" ? (reason || null) : null,
+      },
     });
 
     if (decision === "APPROVED") {
