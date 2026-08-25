@@ -12,10 +12,9 @@ export async function GET() {
   }
 
   const users = await prisma.user.findMany({
-    where: { role: "EMPLOYEE" },
     orderBy: { name: "asc" },
     select: {
-      id: true, name: true, email: true, department: true, shiftGroup: true,
+      id: true, name: true, email: true, department: true, shiftGroup: true, shiftType: true, role: true,
       phone: true, qualifications: true, employeeType: true, rank: true,
       hoursOvertime: true, hoursHolidays: true, hoursAnnual: true, hoursAccumulated: true,
       daysLeave: true, daysDayOff: true,
@@ -33,7 +32,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const {
-    name, email, password, department, role, shiftGroup,
+    name, email, password, department, role, shiftGroup, shiftType,
     phone, qualifications, employeeType, rank,
     hoursOvertime, hoursHolidays, hoursAnnual, hoursAccumulated,
     daysLeave, daysDayOff,
@@ -52,16 +51,20 @@ export async function POST(req: NextRequest) {
   const finalRole = role === "ADMIN" ? "ADMIN" : "EMPLOYEE";
 
   const validGroups = groupsForDepartment(department);
-  if (finalRole === "EMPLOYEE" && !validGroups.includes(shiftGroup)) {
+  if (!validGroups.includes(shiftGroup)) {
     return NextResponse.json({ error: "Επίλεξε έγκυρη ομάδα για αυτό το τμήμα." }, { status: 400 });
   }
 
+  if (department === "Μονιάτης" && shiftType !== "DAY" && shiftType !== "NIGHT") {
+    return NextResponse.json({ error: "Επίλεξε βάρδια (Ημέρα/Νύχτα) για το Μονιάτης." }, { status: 400 });
+  }
+
   const phoneStr = String(phone || "").trim();
-  if (finalRole === "EMPLOYEE" && !/^\d{8}$/.test(phoneStr)) {
+  if (!/^\d{8}$/.test(phoneStr)) {
     return NextResponse.json({ error: "Ο αριθμός τηλεφώνου πρέπει να έχει ακριβώς 8 ψηφία." }, { status: 400 });
   }
 
-  if (finalRole === "EMPLOYEE" && !RANKS.includes(rank)) {
+  if (!RANKS.includes(rank)) {
     return NextResponse.json({ error: "Επίλεξε έγκυρο βαθμό." }, { status: 400 });
   }
 
@@ -81,9 +84,10 @@ export async function POST(req: NextRequest) {
       email: username,
       passwordHash,
       department,
-      shiftGroup: finalRole === "EMPLOYEE" ? shiftGroup : null,
-      phone: finalRole === "EMPLOYEE" ? phoneStr : null,
-      rank: finalRole === "EMPLOYEE" ? rank : null,
+      shiftGroup,
+      shiftType: department === "Μονιάτης" ? shiftType : null,
+      phone: phoneStr,
+      rank,
       qualifications: quals,
       employeeType: finalEmployeeType,
       hoursOvertime: Math.round(Number(hoursOvertime || 0)),

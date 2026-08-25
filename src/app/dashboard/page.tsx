@@ -44,6 +44,7 @@ export default function Dashboard() {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [leaveType, setLeaveType] = useState<"LEAVE" | "DAYOFF">("LEAVE");
+  const [shiftType, setShiftType] = useState<"DAY" | "NIGHT">("DAY");
   const [error, setError] = useState("");
   const [coverageWarning, setCoverageWarning] = useState("");
 
@@ -117,6 +118,7 @@ export default function Dashboard() {
     setError("");
     const body: any = { startDate: start, endDate: end };
     if (me?.employeeType === "PERMANENT") body.leaveType = leaveType;
+    if (me?.department === "Μονιάτης") body.shiftType = shiftType;
     const res = await fetch("/api/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -190,6 +192,7 @@ export default function Dashboard() {
   if (!me) return <div className="p-8 text-ink/50">Φόρτωση...</div>;
 
   const isPermanent = me.employeeType === "PERMANENT";
+  const isMoniatis = me.department === "Μονιάτης";
   const totalHours = me.hoursOvertime + me.hoursHolidays + me.hoursAnnual + me.hoursAccumulated;
 
   return (
@@ -276,6 +279,12 @@ export default function Dashboard() {
             <div className="flex gap-2 mb-3">
               <button type="button" onClick={() => setLeaveType("LEAVE")} className={`text-sm px-3 py-1.5 rounded-full ${leaveType === "LEAVE" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Άδεια</button>
               <button type="button" onClick={() => setLeaveType("DAYOFF")} className={`text-sm px-3 py-1.5 rounded-full ${leaveType === "DAYOFF" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Ημεραργία</button>
+            </div>
+          )}
+          {isMoniatis && (
+            <div className="flex gap-2 mb-3">
+              <button type="button" onClick={() => setShiftType("DAY")} className={`text-sm px-3 py-1.5 rounded-full ${shiftType === "DAY" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Βάρδια Ημέρας</button>
+              <button type="button" onClick={() => setShiftType("NIGHT")} className={`text-sm px-3 py-1.5 rounded-full ${shiftType === "NIGHT" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Βάρδια Νύχτας</button>
             </div>
           )}
           <div className="flex flex-wrap gap-3 items-end">

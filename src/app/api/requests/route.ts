@@ -36,13 +36,21 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Μη εξουσιοδοτημένος." }, { status: 401 });
 
-  const { startDate, endDate, leaveType } = await req.json();
+  const { startDate, endDate, leaveType, shiftType } = await req.json();
   if (!startDate || !endDate || endDate < startDate) {
     return NextResponse.json({ error: "Μη έγκυρο εύρος ημερομηνιών." }, { status: 400 });
   }
 
   const user = await prisma.user.findUnique({ where: { id: session.sub } });
   if (!user) return NextResponse.json({ error: "Δεν βρέθηκε χρήστης." }, { status: 404 });
+
+  let finalShiftType: "DAY" | "NIGHT" | null = null;
+  if (user.department === "Μονιάτης") {
+    if (shiftType !== "DAY" && shiftType !== "NIGHT") {
+      return NextResponse.json({ error: "Επίλεξε βάρδια: Ημέρα ή Νύχτα." }, { status: 400 });
+    }
+    finalShiftType = shiftType;
+  }
 
   if (user.employeeType === "PERMANENT") {
     if (leaveType !== "LEAVE" && leaveType !== "DAYOFF") {
@@ -57,6 +65,7 @@ export async function POST(req: NextRequest) {
         hours: 0,
         days,
         leaveType,
+        shiftType: finalShiftType,
         status: "PENDING",
       },
     });
@@ -74,6 +83,7 @@ export async function POST(req: NextRequest) {
       startDate: new Date(startDate + "T00:00:00Z"),
       endDate: new Date(endDate + "T00:00:00Z"),
       hours,
+      shiftType: finalShiftType,
       status: "PENDING",
     },
   });

@@ -10,7 +10,7 @@ export async function GET() {
   if (!me) return NextResponse.json({ error: "Δεν βρέθηκε χρήστης." }, { status: 404 });
 
   const colleagues = await prisma.user.findMany({
-    where: { role: "EMPLOYEE", department: me.department, id: { not: me.id } },
+    where: { department: me.department, id: { not: me.id } },
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });

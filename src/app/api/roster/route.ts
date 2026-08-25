@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const [users, approvedOnDay, cycles, approvedSwaps] = await Promise.all([
     prisma.user.findMany({
       orderBy: { name: "asc" },
-      select: { id: true, name: true, email: true, department: true, shiftGroup: true, phone: true, qualifications: true, rank: true, role: true },
+      select: { id: true, name: true, email: true, department: true, shiftGroup: true, shiftType: true, phone: true, qualifications: true, rank: true, role: true },
     }),
     prisma.leaveRequest.findMany({
       where: { status: "APPROVED", startDate: { lte: day }, endDate: { gte: day } },
@@ -54,16 +54,14 @@ export async function GET(req: NextRequest) {
     return idx === -1 ? RANKS.length : idx;
   };
 
+  // όλο το προσωπικό (και οι διαχειριστές είναι μέλη του προσωπικού)
   const roster = users
-    .filter((u) => u.role === "EMPLOYEE")
     .map((u) => {
       const onLeave = onLeaveIds.has(u.id);
       const dept = u.department || "";
       const workingGroup = workingGroupByDept[dept];
       const onShift = !workingGroup || u.shiftGroup === workingGroup;
 
-      // "OFF" = εκτός βάρδιας λόγω κύκλου εργασίας (σαν υπερωρία/ρεπό βάρδιας)
-      // "Άδεια" = οποιαδήποτε άλλη περίπτωση απουσίας (κανονική άδεια, ημεραργία, κάλυψη από συνάδελφο)
       let status: "working" | "off" | "on_leave" = "working";
       if (swapCoverIds.has(u.id)) status = "working";
       else if (onLeave || swapOffIds.has(u.id)) status = "on_leave";
@@ -76,14 +74,18 @@ export async function GET(req: NextRequest) {
         department: u.department,
         rank: u.rank,
         shiftGroup: u.shiftGroup,
+        shiftType: u.shiftType,
         phone: u.phone,
         qualifications: u.qualifications,
+        role: u.role,
         status,
       };
     })
     .sort((a, b) => {
       const depCompare = (a.department || "").localeCompare(b.department || "", "el");
       if (depCompare !== 0) return depCompare;
+      const shiftCompare = (a.shiftType || "").localeCompare(b.shiftType || "");
+      if (shiftCompare !== 0) return shiftCompare;
       return rankOrder(a.rank) - rankOrder(b.rank);
     });
 

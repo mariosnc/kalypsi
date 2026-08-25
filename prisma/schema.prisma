@@ -46,6 +46,11 @@ enum EmployeeType {
   TWP       // Τ.Ω.Π.
 }
 
+enum ShiftType {
+  DAY   // Ημέρα
+  NIGHT // Νύχτα
+}
+
 model User {
   id             String       @id @default(cuid())
   email          String       @unique
@@ -58,6 +63,7 @@ model User {
   qualifications String[]     @default([])
   employeeType   EmployeeType @default(TWP)
   rank           String?
+  shiftType      ShiftType? // μόνο για Μονιάτης (Ημέρα/Νύχτα)
 
   // Τ.Ω.Π. — υπόλοιπα σε ώρες
   hoursOvertime    Int @default(0) // Υπερωρίες
@@ -86,6 +92,7 @@ model LeaveRequest {
   hours           Int           @default(0) // για Τ.Ω.Π.
   days            Int? // για Μόνιμο
   leaveType       String? // "LEAVE" | "DAYOFF" — μόνο για Μόνιμο
+  shiftType       ShiftType? // Ημέρα/Νύχτα — μόνο για αιτήσεις υπαλλήλων Μονιάτη
   status          RequestStatus @default(PENDING)
   rejectionReason String?
   decidedAt       DateTime?
