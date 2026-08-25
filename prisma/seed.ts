@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 async function main() {
   const passwordHash = await bcrypt.hash("password123", 10);
 
-  const admin = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: "admin@company.gr" },
     update: {},
     create: {
@@ -14,32 +14,31 @@ async function main() {
       name: "Διαχειριστής Προσωπικού",
       role: "ADMIN",
       department: "Διοίκηση",
-      balanceHours: 160,
+      employeeType: "TWP",
+      hoursAnnual: 160,
       passwordHash,
     },
   });
 
   const employeesData = [
-    { email: "eleni@company.gr", name: "Ελένη Παπαδοπούλου", department: "Πωλήσεις", balanceHours: 160 },
-    { email: "giorgos@company.gr", name: "Γιώργος Νικολάου", department: "Αποθήκη", balanceHours: 96 },
-    { email: "maria@company.gr", name: "Μαρία Κωνσταντίνου", department: "Πωλήσεις", balanceHours: 128 },
-    { email: "dimitris@company.gr", name: "Δημήτρης Αντωνίου", department: "Εξυπηρέτηση", balanceHours: 40 },
-    { email: "sofia@company.gr", name: "Σοφία Γεωργίου", department: "Αποθήκη", balanceHours: 152 },
-    { email: "kostas@company.gr", name: "Κώστας Παύλου", department: "Πωλήσεις", balanceHours: 112 },
+    { email: "eleni", name: "Ελένη Παπαδοπούλου", department: "Μονιάτης", shiftGroup: "Λευκή", phone: "99000001", rank: "Πυρ/μος", employeeType: "TWP" as const, hoursAnnual: 160 },
+    { email: "giorgos", name: "Γιώργος Νικολάου", department: "Πελένδρι", shiftGroup: "Α", phone: "99000002", rank: "Α/Π", employeeType: "PERMANENT" as const, daysLeave: 20 },
+    { email: "maria", name: "Μαρία Κωνσταντίνου", department: "Μονιάτης", shiftGroup: "Πράσινη", phone: "99000003", rank: "Ε/Π", employeeType: "TWP" as const, hoursAnnual: 128 },
+    { email: "dimitris", name: "Δημήτρης Αντωνίου", department: "Αγρός", shiftGroup: "Β", phone: "99000004", rank: "Δ/Πυρ.", employeeType: "PERMANENT" as const, daysLeave: 15 },
   ];
 
   for (const e of employeesData) {
+    const { email, ...rest } = e;
     await prisma.user.upsert({
-      where: { email: e.email },
+      where: { email },
       update: {},
-      create: { ...e, role: "EMPLOYEE", passwordHash },
+      create: { email, ...rest, role: "EMPLOYEE", passwordHash },
     });
   }
 
   console.log("Seed ολοκληρώθηκε.");
   console.log("Admin login: admin@company.gr / password123");
-  console.log("Employee login (π.χ.): eleni@company.gr / password123");
-  console.log("Τα ελάχιστα προσωπικού ανά τμήμα δημιουργούνται αυτόματα με προεπιλογή 1 — άλλαξέ τα από το admin panel.");
+  console.log("Employee login (π.χ.): eleni / password123");
 }
 
 main()
