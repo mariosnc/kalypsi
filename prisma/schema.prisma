@@ -24,19 +24,57 @@ enum AbsenceType {
   TRAINING
 }
 
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         Role     @default(EMPLOYEE)
-  department   String?
-  shiftGroup   String?
-  balanceHours Int      @default(0)
-  createdAt    DateTime @default(now())
+enum BalanceCategory {
+  OVERTIME
+  HOLIDAYS
+  ANNUAL
+  ACCUMULATED
+  DAYS_LEAVE
+  DAYS_DAYOFF
+}
 
-  requests    LeaveRequest[]
-  adjustments BalanceAdjustment[]
+enum SwapStatus {
+  PENDING
+  COLLEAGUE_DECLINED
+  COLLEAGUE_ACCEPTED
+  ADMIN_REJECTED
+  APPROVED
+}
+
+enum EmployeeType {
+  PERMANENT // Μόνιμος
+  TWP       // Τ.Ω.Π.
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  name           String
+  role           Role         @default(EMPLOYEE)
+  department     String?
+  shiftGroup     String?
+  phone          String?
+  qualifications String[]     @default([])
+  employeeType   EmployeeType @default(TWP)
+  rank           String?
+
+  // Τ.Ω.Π. — υπόλοιπα σε ώρες
+  hoursOvertime    Int @default(0) // Υπερωρίες
+  hoursHolidays    Int @default(0) // Αργίες
+  hoursAnnual      Int @default(0) // Έτους
+  hoursAccumulated Int @default(0) // Συσσωρευμένη
+
+  // Μόνιμος — υπόλοιπα σε ημέρες
+  daysLeave  Int @default(0) // Άδεια
+  daysDayOff Int @default(0) // Ημεραργία
+
+  createdAt DateTime @default(now())
+
+  requests             LeaveRequest[]
+  adjustments          BalanceAdjustment[]
+  swapRequestsSent     ShiftSwap[]         @relation("SwapRequester")
+  swapRequestsReceived ShiftSwap[]         @relation("SwapColleague")
 }
 
 model LeaveRequest {
@@ -45,7 +83,9 @@ model LeaveRequest {
   user            User          @relation(fields: [userId], references: [id])
   startDate       DateTime
   endDate         DateTime
-  hours           Int
+  hours           Int           @default(0) // για Τ.Ω.Π.
+  days            Int? // για Μόνιμο
+  leaveType       String? // "LEAVE" | "DAYOFF" — μόνο για Μόνιμο
   status          RequestStatus @default(PENDING)
   rejectionReason String?
   decidedAt       DateTime?
@@ -56,12 +96,13 @@ model LeaveRequest {
 }
 
 model BalanceAdjustment {
-  id        String   @id @default(cuid())
+  id        String          @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User            @relation(fields: [userId], references: [id])
+  category  BalanceCategory
   hours     Int
   reason    String?
-  createdAt DateTime @default(now())
+  createdAt DateTime        @default(now())
 
   @@index([userId])
 }
@@ -92,4 +133,20 @@ model ShiftCycle {
   department       String   @unique
   anchorDate       DateTime
   anchorGroupIndex Int      @default(0)
+}
+
+// Αίτημα ανταλλαγής βάρδιας μεταξύ δύο συναδέλφων
+model ShiftSwap {
+  id          String     @id @default(cuid())
+  requesterId String
+  requester   User       @relation("SwapRequester", fields: [requesterId], references: [id])
+  colleagueId String
+  colleague   User       @relation("SwapColleague", fields: [colleagueId], references: [id])
+  date        DateTime
+  status      SwapStatus @default(PENDING)
+  createdAt   DateTime   @default(now())
+  decidedAt   DateTime?
+
+  @@index([requesterId])
+  @@index([colleagueId])
 }

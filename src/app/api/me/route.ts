@@ -15,6 +15,16 @@ export async function GET() {
     email: user.email,
     role: user.role,
     department: user.department,
-    balanceHours: user.balanceHours,
+    shiftGroup: user.shiftGroup,
+    phone: user.phone,
+    qualifications: user.qualifications,
+    employeeType: user.employeeType,
+    rank: user.rank,
+    hoursOvertime: user.hoursOvertime,
+    hoursHolidays: user.hoursHolidays,
+    hoursAnnual: user.hoursAnnual,
+    hoursAccumulated: user.hoursAccumulated,
+    daysLeave: user.daysLeave,
+    daysDayOff: user.daysDayOff,
   });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { deductCascading } from "@/lib/balances";
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getSession();
@@ -30,10 +31,27 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     if (decision === "APPROVED") {
-      await tx.user.update({
-        where: { id: existing.userId },
-        data: { balanceHours: { decrement: existing.hours } },
-      });
+      const user = await tx.user.findUnique({ where: { id: existing.userId } });
+      if (user) {
+        if (user.employeeType === "PERMANENT" && existing.days) {
+          if (existing.leaveType === "DAYOFF") {
+            await tx.user.update({ where: { id: user.id }, data: { daysDayOff: { decrement: existing.days } } });
+          } else {
+            await tx.user.update({ where: { id: user.id }, data: { daysLeave: { decrement: existing.days } } });
+          }
+        } else {
+          const newBalances = deductCascading(
+            {
+              hoursOvertime: user.hoursOvertime,
+              hoursHolidays: user.hoursHolidays,
+              hoursAnnual: user.hoursAnnual,
+              hoursAccumulated: user.hoursAccumulated,
+            },
+            existing.hours
+          );
+          await tx.user.update({ where: { id: user.id }, data: newBalances });
+        }
+      }
     }
 
     return updated;

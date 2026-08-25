@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { groupsForDepartment } from "@/lib/shifts";
+import { QUALIFICATIONS, RANKS } from "@/lib/balances";
 
 export async function GET() {
   const session = await getSession();
@@ -13,7 +14,12 @@ export async function GET() {
   const users = await prisma.user.findMany({
     where: { role: "EMPLOYEE" },
     orderBy: { name: "asc" },
-    select: { id: true, name: true, email: true, department: true, shiftGroup: true, balanceHours: true },
+    select: {
+      id: true, name: true, email: true, department: true, shiftGroup: true,
+      phone: true, qualifications: true, employeeType: true, rank: true,
+      hoursOvertime: true, hoursHolidays: true, hoursAnnual: true, hoursAccumulated: true,
+      daysLeave: true, daysDayOff: true,
+    },
   });
 
   return NextResponse.json(users);
@@ -25,7 +31,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να προσθέσει χρήστη." }, { status: 403 });
   }
 
-  const { name, email, password, department, balanceHours, role, shiftGroup } = await req.json();
+  const body = await req.json();
+  const {
+    name, email, password, department, role, shiftGroup,
+    phone, qualifications, employeeType, rank,
+    hoursOvertime, hoursHolidays, hoursAnnual, hoursAccumulated,
+    daysLeave, daysDayOff,
+  } = body;
 
   if (!name || !email || !password || !department) {
     return NextResponse.json({ error: "Λείπει όνομα, όνομα χρήστη, κωδικός ή τμήμα." }, { status: 400 });
@@ -44,6 +56,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Επίλεξε έγκυρη ομάδα για αυτό το τμήμα." }, { status: 400 });
   }
 
+  const phoneStr = String(phone || "").trim();
+  if (finalRole === "EMPLOYEE" && !/^\d{8}$/.test(phoneStr)) {
+    return NextResponse.json({ error: "Ο αριθμός τηλεφώνου πρέπει να έχει ακριβώς 8 ψηφία." }, { status: 400 });
+  }
+
+  if (finalRole === "EMPLOYEE" && !RANKS.includes(rank)) {
+    return NextResponse.json({ error: "Επίλεξε έγκυρο βαθμό." }, { status: 400 });
+  }
+
+  const finalEmployeeType = employeeType === "PERMANENT" ? "PERMANENT" : "TWP";
+  const quals: string[] = Array.isArray(qualifications) ? qualifications.filter((q: string) => QUALIFICATIONS.includes(q)) : [];
+
   const existing = await prisma.user.findUnique({ where: { email: username } });
   if (existing) {
     return NextResponse.json({ error: "Υπάρχει ήδη χρήστης με αυτό το όνομα χρήστη." }, { status: 409 });
@@ -58,13 +82,19 @@ export async function POST(req: NextRequest) {
       passwordHash,
       department,
       shiftGroup: finalRole === "EMPLOYEE" ? shiftGroup : null,
-      balanceHours: Math.round(Number(balanceHours || 0)),
+      phone: finalRole === "EMPLOYEE" ? phoneStr : null,
+      rank: finalRole === "EMPLOYEE" ? rank : null,
+      qualifications: quals,
+      employeeType: finalEmployeeType,
+      hoursOvertime: Math.round(Number(hoursOvertime || 0)),
+      hoursHolidays: Math.round(Number(hoursHolidays || 0)),
+      hoursAnnual: Math.round(Number(hoursAnnual || 0)),
+      hoursAccumulated: Math.round(Number(hoursAccumulated || 0)),
+      daysLeave: Math.round(Number(daysLeave || 0)),
+      daysDayOff: Math.round(Number(daysDayOff || 0)),
       role: finalRole,
     },
   });
 
-  return NextResponse.json(
-    { id: user.id, name: user.name, email: user.email, department: user.department, shiftGroup: user.shiftGroup, balanceHours: user.balanceHours },
-    { status: 201 }
-  );
+  return NextResponse.json({ id: user.id, name: user.name, email: user.email }, { status: 201 });
 }

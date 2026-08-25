@@ -2,53 +2,67 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays, UserPlus, KeyRound, Stethoscope, GraduationCap, Trash2, RefreshCw } from "lucide-react";
+import {
+  CheckCircle2, XCircle, Printer, AlertTriangle, Users, LogOut, CalendarDays,
+  UserPlus, KeyRound, Stethoscope, GraduationCap, Trash2, RefreshCw, Repeat, ChevronDown, ChevronUp,
+} from "lucide-react";
 
 type PendingReq = {
-  id: string;
-  startDate: string;
-  endDate: string;
-  hours: number;
-  status: string;
-  user: { id: string; name: string; department: string | null; balanceHours: number };
+  id: string; startDate: string; endDate: string; hours: number; days?: number | null; leaveType?: string | null; status: string;
+  user: { id: string; name: string; department: string | null; employeeType: string; hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number; daysLeave: number; daysDayOff: number };
 };
 type RosterRow = {
-  id: string;
-  name: string;
-  department: string | null;
-  shiftGroup: string | null;
-  workingGroup?: string;
-  status: "leave" | "off_shift" | "working";
+  id: string; name: string; email: string; department: string | null; rank: string | null;
+  shiftGroup: string | null; phone: string | null; qualifications: string[]; status: "working" | "off" | "on_leave";
 };
 type CoverageDay = { date: string; byDept: Record<string, number> };
 type StaffingRuleRow = { id: string; department: string; totalForce: number };
-type EmployeeRow = { id: string; name: string; email: string; department: string | null; shiftGroup: string | null; balanceHours: number };
+type EmployeeRow = {
+  id: string; name: string; email: string; department: string | null; shiftGroup: string | null;
+  phone: string | null; qualifications: string[]; employeeType: "PERMANENT" | "TWP"; rank: string | null;
+  hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
+  daysLeave: number; daysDayOff: number;
+};
 type AbsenceRow = { id: string; department: string; type: "DOCTOR" | "TRAINING"; count: number; startDate: string; endDate: string };
 type ShiftCycleRow = { department: string; groups: string[]; workingGroup: string };
+type SwapRow = { id: string; date: string; status: string; requester: { id: string; name: string }; colleague: { id: string; name: string } };
 
 const DEPARTMENTS = ["Μονιάτης", "Πελένδρι", "Αγρός", "Εφταγώνια", "Πάχνα", "Κυβίδες"];
+const QUALIFICATIONS = ["ΟΔ/ΑΣ", "ΟΔ", "ΑΣ", "οδ/ΑΣ", "οδ"];
+const RANKS = ["Πυρ/μος", "Α/Π", "Δ/Πυρ.", "Ε/Π"];
 const groupsForDepartment = (dept: string) => (dept === "Μονιάτης" ? ["Πράσινη", "Ερυθρά", "Κυανή", "Λευκή"] : ["Α", "Β"]);
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-const statusLabel: Record<string, { label: string; color: string }> = {
+const rosterStatusLabel: Record<string, { label: string; color: string }> = {
   working: { label: "Εργασία", color: "text-teal" },
-  leave: { label: "Άδεια", color: "text-brick" },
-  off_shift: { label: "Εκτός βάρδιας", color: "text-amber" },
+  off: { label: "OFF", color: "text-amber" },
+  on_leave: { label: "Άδεια", color: "text-brick" },
+};
+
+const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
+  PENDING: { label: "Αναμονή συναδέλφου", bg: "#C97A2E1A", fg: "#C97A2E" },
+  COLLEAGUE_ACCEPTED: { label: "Προς έγκριση", bg: "#C97A2E1A", fg: "#C97A2E" },
+  COLLEAGUE_DECLINED: { label: "Απορρίφθηκε (συνάδελφος)", bg: "#A8453A1A", fg: "#A8453A" },
+  ADMIN_REJECTED: { label: "Απορρίφθηκε", bg: "#A8453A1A", fg: "#A8453A" },
+  APPROVED: { label: "Εγκρίθηκε", bg: "#2F6F5E1A", fg: "#2F6F5E" },
 };
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "roster" | "balances" | "new" | "absences" | "shifts">("pending");
+  const [tab, setTab] = useState<"pending" | "roster" | "employees" | "absences" | "shifts" | "swaps" | "new">("pending");
   const [pending, setPending] = useState<PendingReq[]>([]);
   const [rules, setRules] = useState<StaffingRuleRow[]>([]);
   const [coverage, setCoverage] = useState<CoverageDay[]>([]);
   const [rosterDate, setRosterDate] = useState(todayISO());
   const [roster, setRoster] = useState<{ working: number; total: number; roster: RosterRow[] } | null>(null);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
+  const [expandedEmp, setExpandedEmp] = useState<string | null>(null);
+  const [empEdit, setEmpEdit] = useState<Record<string, any>>({});
   const [adjustAmt, setAdjustAmt] = useState<Record<string, string>>({});
-  const [groupEdit, setGroupEdit] = useState<Record<string, string>>({});
+  const [adjustCat, setAdjustCat] = useState<Record<string, string>>({});
+  const [resetMsg, setResetMsg] = useState<Record<string, string>>({});
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
@@ -65,6 +79,8 @@ export default function AdminPage() {
   const [fixDate, setFixDate] = useState(todayISO());
   const [fixGroup, setFixGroup] = useState("");
 
+  const [swaps, setSwaps] = useState<SwapRow[]>([]);
+
   const [showPassword, setShowPassword] = useState(false);
   const [curPass, setCurPass] = useState("");
   const [newPass, setNewPass] = useState("");
@@ -76,7 +92,16 @@ export default function AdminPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newDept, setNewDept] = useState("");
   const [newGroup, setNewGroup] = useState("");
-  const [newBalanceHours, setNewBalanceHours] = useState("160");
+  const [newPhone, setNewPhone] = useState("");
+  const [newRank, setNewRank] = useState("");
+  const [newEmpType, setNewEmpType] = useState<"PERMANENT" | "TWP">("TWP");
+  const [newQuals, setNewQuals] = useState<string[]>([]);
+  const [newHoursOvertime, setNewHoursOvertime] = useState("0");
+  const [newHoursHolidays, setNewHoursHolidays] = useState("0");
+  const [newHoursAnnual, setNewHoursAnnual] = useState("160");
+  const [newHoursAccumulated, setNewHoursAccumulated] = useState("0");
+  const [newDaysLeave, setNewDaysLeave] = useState("20");
+  const [newDaysDayOff, setNewDaysDayOff] = useState("0");
   const [newRole, setNewRole] = useState<"EMPLOYEE" | "ADMIN">("EMPLOYEE");
   const [newError, setNewError] = useState("");
   const [newSuccess, setNewSuccess] = useState("");
@@ -85,87 +110,58 @@ export default function AdminPage() {
     const res = await fetch("/api/requests?status=PENDING");
     if (res.ok) setPending(await res.json());
   }, []);
-
   const loadRules = useCallback(async () => {
     const res = await fetch("/api/staffing-rule");
     if (res.ok) setRules(await res.json());
   }, []);
-
   const loadCoverage = useCallback(async () => {
     const month = todayISO().slice(0, 7);
     const res = await fetch(`/api/coverage?month=${month}`);
     if (res.ok) setCoverage((await res.json()).days);
   }, []);
-
   const loadRoster = useCallback(async (date: string) => {
     const res = await fetch(`/api/roster?date=${date}`);
     if (res.ok) setRoster(await res.json());
   }, []);
-
   const loadEmployees = useCallback(async () => {
     const res = await fetch("/api/users");
     if (res.ok) setEmployees(await res.json());
   }, []);
-
   const loadAbsences = useCallback(async () => {
     const res = await fetch("/api/absences");
     if (res.ok) setAbsences(await res.json());
   }, []);
-
   const loadShiftCycles = useCallback(async () => {
     const res = await fetch("/api/shift-cycle");
     if (res.ok) setShiftCycles(await res.json());
   }, []);
+  const loadSwaps = useCallback(async () => {
+    const res = await fetch("/api/swaps");
+    if (res.ok) setSwaps(await res.json());
+  }, []);
 
-  useEffect(() => {
-    loadPending();
-    loadRules();
-    loadCoverage();
-  }, [loadPending, loadRules, loadCoverage]);
-
-  useEffect(() => {
-    if (tab === "roster") loadRoster(rosterDate);
-  }, [tab, rosterDate, loadRoster]);
-
-  useEffect(() => {
-    if (tab === "balances") loadEmployees();
-  }, [tab, loadEmployees]);
-
-  useEffect(() => {
-    if (tab === "absences") loadAbsences();
-  }, [tab, loadAbsences]);
-
-  useEffect(() => {
-    if (tab === "shifts") loadShiftCycles();
-  }, [tab, loadShiftCycles]);
-
-  useEffect(() => {
-    const groups = groupsForDepartment(newDept);
-    setNewGroup(groups[0] || "");
-  }, [newDept]);
-
-  useEffect(() => {
-    const groups = groupsForDepartment(fixDept);
-    setFixGroup(groups[0] || "");
-  }, [fixDept]);
+  useEffect(() => { loadPending(); loadRules(); loadCoverage(); }, [loadPending, loadRules, loadCoverage]);
+  useEffect(() => { if (tab === "roster") loadRoster(rosterDate); }, [tab, rosterDate, loadRoster]);
+  useEffect(() => { if (tab === "employees") loadEmployees(); }, [tab, loadEmployees]);
+  useEffect(() => { if (tab === "absences") loadAbsences(); }, [tab, loadAbsences]);
+  useEffect(() => { if (tab === "shifts") loadShiftCycles(); }, [tab, loadShiftCycles]);
+  useEffect(() => { if (tab === "swaps") loadSwaps(); }, [tab, loadSwaps]);
+  useEffect(() => { setNewGroup(groupsForDepartment(newDept)[0] || ""); }, [newDept]);
+  useEffect(() => { setFixGroup(groupsForDepartment(fixDept)[0] || ""); }, [fixDept]);
 
   async function decide(id: string, decision: "APPROVED" | "REJECTED", reason?: string) {
     await fetch(`/api/requests/${id}/decision`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision, reason }),
     });
-    setRejectingId(null);
-    setRejectReason("");
-    loadPending();
-    loadCoverage();
+    setRejectingId(null); setRejectReason("");
+    loadPending(); loadCoverage();
   }
 
   async function updateTotalForce(department: string, v: number) {
     setRules((rs) => rs.map((r) => (r.department === department ? { ...r, totalForce: v } : r)));
     await fetch("/api/staffing-rule", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ department, totalForce: v }),
     });
     loadCoverage();
@@ -173,33 +169,47 @@ export default function AdminPage() {
 
   async function applyAdjust(userId: string) {
     const val = Number(adjustAmt[userId] || 0);
-    if (!val) return;
+    const cat = adjustCat[userId];
+    if (!val || !cat) return;
     await fetch(`/api/users/${userId}/adjust`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hours: val, reason: "Χειροκίνητη προσαρμογή" }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hours: val, category: cat, reason: "Χειροκίνητη προσαρμογή" }),
     });
     setAdjustAmt((a) => ({ ...a, [userId]: "" }));
     loadEmployees();
   }
 
-  async function saveGroup(userId: string) {
-    const val = groupEdit[userId];
-    if (!val) return;
-    await fetch(`/api/users/${userId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shiftGroup: val }),
+  async function saveEmployee(id: string) {
+    const edits = empEdit[id];
+    if (!edits) return;
+    const res = await fetch(`/api/users/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(edits),
     });
-    loadEmployees();
+    if (res.ok) loadEmployees();
+  }
+
+  async function resetPassword(id: string) {
+    const res = await fetch(`/api/users/${id}/reset-password`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setResetMsg((m) => ({ ...m, [id]: res.ok ? `Νέος κωδικός: ${data.newPassword}` : data.error || "Σφάλμα" }));
+  }
+
+  function updateEdit(id: string, field: string, value: any) {
+    setEmpEdit((e) => ({ ...e, [id]: { ...e[id], [field]: value } }));
+  }
+
+  function toggleEditQual(id: string, current: string[], q: string) {
+    const set = new Set(current);
+    if (set.has(q)) set.delete(q); else set.add(q);
+    updateEdit(id, "qualifications", Array.from(set));
   }
 
   async function addAbsence(e: React.FormEvent) {
     e.preventDefault();
     setAbsError("");
     const res = await fetch("/api/absences", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ department: absDept, type: absType, count: absCount, startDate: absStart, endDate: absEnd }),
     });
     if (!res.ok) {
@@ -207,42 +217,45 @@ export default function AdminPage() {
       setAbsError(data.error || "Κάτι πήγε στραβά.");
       return;
     }
-    setAbsCount("1");
-    loadAbsences();
-    loadCoverage();
+    setAbsCount("1"); loadAbsences(); loadCoverage();
   }
 
   async function removeAbsence(id: string) {
     await fetch(`/api/absences/${id}`, { method: "DELETE" });
-    loadAbsences();
-    loadCoverage();
+    loadAbsences(); loadCoverage();
   }
 
   async function fixShiftCycle(e: React.FormEvent) {
     e.preventDefault();
     await fetch("/api/shift-cycle", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ department: fixDept, date: fixDate, group: fixGroup }),
     });
     loadShiftCycles();
   }
 
+  async function decideSwap(id: string, decision: "APPROVED" | "ADMIN_REJECTED") {
+    await fetch(`/api/swaps/${id}/decision`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+    loadSwaps();
+  }
+
+  function toggleNewQual(q: string) {
+    setNewQuals((qs) => (qs.includes(q) ? qs.filter((x) => x !== q) : [...qs, q]));
+  }
+
   async function createEmployee(e: React.FormEvent) {
     e.preventDefault();
-    setNewError("");
-    setNewSuccess("");
+    setNewError(""); setNewSuccess("");
     const res = await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: newName,
-        email: newEmail,
-        password: newPassword,
-        department: newDept,
-        shiftGroup: newGroup,
-        balanceHours: newBalanceHours,
-        role: newRole,
+        name: newName, email: newEmail, password: newPassword, department: newDept, shiftGroup: newGroup,
+        phone: newPhone, rank: newRank, employeeType: newEmpType, qualifications: newQuals, role: newRole,
+        hoursOvertime: newHoursOvertime, hoursHolidays: newHoursHolidays, hoursAnnual: newHoursAnnual, hoursAccumulated: newHoursAccumulated,
+        daysLeave: newDaysLeave, daysDayOff: newDaysDayOff,
       }),
     });
     if (!res.ok) {
@@ -250,23 +263,17 @@ export default function AdminPage() {
       setNewError(data.error || "Κάτι πήγε στραβά.");
       return;
     }
-    setNewSuccess(`Ο/Η ${newName} προστέθηκε ως ${newRole === "ADMIN" ? "διαχειριστής" : "υπάλληλος"}${newRole === "EMPLOYEE" ? ` στην ομάδα ${newGroup}` : ""}. Δώσε του/της όνομα χρήστη: ${newEmail} και τον κωδικό που όρισες.`);
-    setNewName("");
-    setNewEmail("");
-    setNewPassword("");
-    setNewDept("");
-    setNewBalanceHours("160");
-    setNewRole("EMPLOYEE");
+    setNewSuccess(`Ο/Η ${newName} προστέθηκε. Όνομα χρήστη: ${newEmail} — κωδικός: ${newPassword}`);
+    setNewName(""); setNewEmail(""); setNewPassword(""); setNewDept(""); setNewPhone(""); setNewRank("");
+    setNewQuals([]); setNewEmpType("TWP"); setNewRole("EMPLOYEE");
     loadRules();
   }
 
   async function changePassword(e: React.FormEvent) {
     e.preventDefault();
-    setPassError("");
-    setPassMsg("");
+    setPassError(""); setPassMsg("");
     const res = await fetch("/api/auth/change-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ currentPassword: curPass, newPassword: newPass }),
     });
     if (!res.ok) {
@@ -274,9 +281,7 @@ export default function AdminPage() {
       setPassError(data.error || "Κάτι πήγε στραβά.");
       return;
     }
-    setPassMsg("Ο κωδικός άλλαξε επιτυχώς.");
-    setCurPass("");
-    setNewPass("");
+    setPassMsg("Ο κωδικός άλλαξε επιτυχώς."); setCurPass(""); setNewPass("");
   }
 
   async function logout() {
@@ -285,6 +290,16 @@ export default function AdminPage() {
   }
 
   const coverageForDate = (iso: string, dept: string) => coverage.find((c) => c.date === iso)?.byDept?.[dept];
+
+  const groupedRoster = roster
+    ? roster.roster.reduce((acc: Record<string, RosterRow[]>, r) => {
+        const k = r.department || "Χωρίς τμήμα";
+        (acc[k] = acc[k] || []).push(r);
+        return acc;
+      }, {})
+    : {};
+
+  const pendingSwaps = swaps.filter((s) => s.status === "COLLEAGUE_ACCEPTED");
 
   return (
     <div className="max-w-4xl mx-auto px-5 py-6 space-y-5">
@@ -321,18 +336,14 @@ export default function AdminPage() {
         {[
           ["pending", `Εκκρεμείς (${pending.length})`],
           ["roster", "Ημερήσια κατάσταση"],
-          ["balances", "Υπόλοιπα"],
+          ["employees", "Υπάλληλοι"],
+          ["swaps", `Ανταλλαγές${pendingSwaps.length ? ` (${pendingSwaps.length})` : ""}`],
           ["absences", "Ιατρού / Εκπαίδευση"],
           ["shifts", "Βάρδιες"],
           ["new", "Νέος υπάλληλος"],
         ].map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key as any)}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-              tab === key ? "bg-ink text-white" : "bg-white border border-ink/10 text-ink/70"
-            }`}
-          >
+          <button key={key} onClick={() => setTab(key as any)}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition ${tab === key ? "bg-ink text-white" : "bg-white border border-ink/10 text-ink/70"}`}>
             {label}
           </button>
         ))}
@@ -341,20 +352,13 @@ export default function AdminPage() {
       {tab === "pending" && (
         <div className="space-y-3">
           <div className="no-print bg-white rounded-xl border border-ink/10 p-3 w-fit">
-            <div className="flex items-center gap-2 text-sm text-ink/50 mb-2">
-              <Users size={15} /> Δύναμη (σύνολο υπαλλήλων) ανά τμήμα
-            </div>
+            <div className="flex items-center gap-2 text-sm text-ink/50 mb-2"><Users size={15} /> Δύναμη ανά τμήμα</div>
             <div className="flex flex-wrap gap-3">
               {rules.map((r) => (
                 <label key={r.department} className="flex items-center gap-2 text-sm">
                   <span className="text-ink/70">{r.department}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={r.totalForce}
-                    onChange={(e) => updateTotalForce(r.department, Number(e.target.value))}
-                    className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono"
-                  />
+                  <input type="number" min={0} value={r.totalForce} onChange={(e) => updateTotalForce(r.department, Number(e.target.value))}
+                    className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono" />
                 </label>
               ))}
               {rules.length === 0 && <span className="text-sm text-ink/40">Δεν υπάρχουν ακόμα τμήματα με υπαλλήλους.</span>}
@@ -362,13 +366,10 @@ export default function AdminPage() {
           </div>
 
           {pending.length === 0 && (
-            <div className="text-sm text-ink/40 bg-white rounded-xl border border-ink/10 p-6 text-center">
-              Καμία εκκρεμής αίτηση.
-            </div>
+            <div className="text-sm text-ink/40 bg-white rounded-xl border border-ink/10 p-6 text-center">Καμία εκκρεμής αίτηση.</div>
           )}
 
           {pending.map((r) => {
-            const afterBalance = r.user.balanceHours - r.hours;
             const dept = r.user.department || "Χωρίς τμήμα";
             const shortage: string[] = [];
             let cur = new Date(r.startDate);
@@ -379,6 +380,7 @@ export default function AdminPage() {
               if (avail !== undefined && avail - 1 < 0) shortage.push(fmt(iso));
               cur.setUTCDate(cur.getUTCDate() + 1);
             }
+            const isPermanent = r.user.employeeType === "PERMANENT";
 
             return (
               <div key={r.id} className="bg-white rounded-xl border border-ink/10 p-4">
@@ -386,39 +388,30 @@ export default function AdminPage() {
                   <div>
                     <div className="font-medium">{r.user.name} <span className="text-xs font-normal text-ink/40">· {dept}</span></div>
                     <div className="text-sm text-ink/50">
-                      {fmt(r.startDate)} – {fmt(r.endDate)} · <span className="font-mono">{r.hours} ώρες</span> ·
-                      υπόλοιπο μετά: <span className="font-mono">{afterBalance} ώρες</span>
+                      {fmt(r.startDate)} – {fmt(r.endDate)}
+                      {isPermanent ? (
+                        <> · <span className="font-mono">{r.days} ημέρες</span> · {r.leaveType === "DAYOFF" ? "Ημεραργία" : "Άδεια"}</>
+                      ) : (
+                        <> · <span className="font-mono">{r.hours} ώρες</span></>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => setRejectingId(rejectingId === r.id ? null : r.id)}
-                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-brick/30 text-brick hover:bg-brick/5"
-                    >
+                    <button onClick={() => setRejectingId(rejectingId === r.id ? null : r.id)}
+                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-brick/30 text-brick hover:bg-brick/5">
                       <XCircle size={15} /> Απόρριψη
                     </button>
-                    <button
-                      onClick={() => decide(r.id, "APPROVED")}
-                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-teal text-white hover:opacity-90"
-                    >
+                    <button onClick={() => decide(r.id, "APPROVED")}
+                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-teal text-white hover:opacity-90">
                       <CheckCircle2 size={15} /> Έγκριση
                     </button>
                   </div>
                 </div>
                 {rejectingId === r.id && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <input
-                      value={rejectReason}
-                      onChange={(e) => setRejectReason(e.target.value)}
-                      placeholder="Αιτιολόγηση απόρριψης (προαιρετικό)"
-                      className="flex-1 min-w-[200px] border border-ink/15 rounded-lg px-3 py-2 text-sm"
-                    />
-                    <button
-                      onClick={() => decide(r.id, "REJECTED", rejectReason)}
-                      className="text-sm px-3 py-2 rounded-lg bg-brick text-white"
-                    >
-                      Επιβεβαίωση απόρριψης
-                    </button>
+                    <input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Αιτιολόγηση απόρριψης (προαιρετικό)"
+                      className="flex-1 min-w-[200px] border border-ink/15 rounded-lg px-3 py-2 text-sm" />
+                    <button onClick={() => decide(r.id, "REJECTED", rejectReason)} className="text-sm px-3 py-2 rounded-lg bg-brick text-white">Επιβεβαίωση απόρριψης</button>
                   </div>
                 )}
                 {shortage.length > 0 && (
@@ -438,12 +431,7 @@ export default function AdminPage() {
           <div className="no-print flex items-center justify-between mb-4 flex-wrap gap-3">
             <label className="flex items-center gap-2 text-sm">
               <CalendarDays size={16} className="text-ink/50" />
-              <input
-                type="date"
-                value={rosterDate}
-                onChange={(e) => setRosterDate(e.target.value)}
-                className="border border-ink/15 rounded-lg px-3 py-2"
-              />
+              <input type="date" value={rosterDate} onChange={(e) => setRosterDate(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
             </label>
             <button onClick={() => window.print()} className="flex items-center gap-2 text-sm bg-ink text-white px-4 py-2 rounded-lg">
               <Printer size={15} /> Εκτύπωση
@@ -455,73 +443,184 @@ export default function AdminPage() {
             {roster && (
               <>
                 <div className="text-sm text-ink/50 mb-4">
-                  {fmt(rosterDate)} · εργάζονται <span className="font-mono">{roster.working}</span> από{" "}
-                  <span className="font-mono">{roster.total}</span>
+                  {fmt(rosterDate)} · εργάζονται <span className="font-mono">{roster.working}</span> από <span className="font-mono">{roster.total}</span>
                 </div>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-ink/40 border-b border-ink/10">
-                      <th className="py-2 font-normal">Όνομα</th>
-                      <th className="py-2 font-normal">Τμήμα</th>
-                      <th className="py-2 font-normal">Ομάδα</th>
-                      <th className="py-2 font-normal text-right">Κατάσταση</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roster.roster.map((e) => (
-                      <tr key={e.id} className="border-b border-ink/5">
-                        <td className="py-2">{e.name}</td>
-                        <td className="py-2 text-ink/50">{e.department}</td>
-                        <td className="py-2 text-ink/50">{e.shiftGroup}</td>
-                        <td className={`py-2 text-right ${statusLabel[e.status].color}`}>{statusLabel[e.status].label}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {Object.entries(groupedRoster).map(([dept, rows]) => (
+                  <div key={dept} className="mb-5">
+                    <div className="font-disp text-base mb-2 text-ink/80">{dept}</div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-ink/40 border-b border-ink/10">
+                          <th className="py-2 font-normal">Όνομα χρήστη</th>
+                          <th className="py-2 font-normal">Ονοματεπώνυμο</th>
+                          <th className="py-2 font-normal">Προσόντα</th>
+                          <th className="py-2 font-normal">Τηλέφωνο</th>
+                          <th className="py-2 font-normal text-right">Κατάσταση</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((e) => (
+                          <tr key={e.id} className="border-b border-ink/5">
+                            <td className="py-2 font-mono text-xs">{e.email}</td>
+                            <td className="py-2">{e.name}</td>
+                            <td className="py-2 text-ink/50 text-xs">{e.qualifications.join(", ")}</td>
+                            <td className="py-2 text-ink/50 font-mono text-xs">{e.phone}</td>
+                            <td className={`py-2 text-right font-medium ${rosterStatusLabel[e.status].color}`}>{rosterStatusLabel[e.status].label}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
               </>
             )}
           </div>
         </div>
       )}
 
-      {tab === "balances" && (
-        <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
-          {employees.map((e) => (
-            <div key={e.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">{e.name}</div>
-                <div className="text-xs text-ink/40">{e.email} · {e.department}</div>
-                <div className="text-sm text-ink/50 font-mono">
-                  {e.balanceHours} ώρες · ≈{(e.balanceHours / 8).toFixed(1)} ημέρες
+      {tab === "employees" && (
+        <div className="space-y-3">
+          <div className="no-print flex justify-end">
+            <button onClick={() => window.print()} className="flex items-center gap-2 text-sm bg-ink text-white px-4 py-2 rounded-lg">
+              <Printer size={15} /> Εκτύπωση υπολοίπων
+            </button>
+          </div>
+          <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+            {employees.map((e) => {
+              const edits = empEdit[e.id] || {};
+              const isPermanent = (edits.employeeType ?? e.employeeType) === "PERMANENT";
+              const expanded = expandedEmp === e.id;
+              return (
+                <div key={e.id} className="p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium">{e.name} <span className="text-xs text-ink/40">· {e.rank} · {e.department}</span></div>
+                      <div className="text-xs text-ink/40">{e.email} · {e.phone}</div>
+                      {isPermanent ? (
+                        <div className="text-sm text-ink/50 font-mono">Άδεια: {e.daysLeave}ημ · Ημεραργία: {e.daysDayOff}ημ</div>
+                      ) : (
+                        <div className="text-sm text-ink/50 font-mono">Σύνολο: {e.hoursOvertime + e.hoursHolidays + e.hoursAnnual + e.hoursAccumulated} ώρες</div>
+                      )}
+                    </div>
+                    <button onClick={() => setExpandedEmp(expanded ? null : e.id)} className="no-print text-sm text-ink/50 flex items-center gap-1">
+                      {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />} Επεξεργασία
+                    </button>
+                  </div>
+
+                  {expanded && (
+                    <div className="no-print mt-4 border-t border-ink/10 pt-4 space-y-3">
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <label className="text-sm">
+                          <div className="text-ink/50 mb-1">Ονοματεπώνυμο</div>
+                          <input defaultValue={e.name} onChange={(ev) => updateEdit(e.id, "name", ev.target.value)} className="w-full border border-ink/15 rounded-lg px-2 py-1.5" />
+                        </label>
+                        <label className="text-sm">
+                          <div className="text-ink/50 mb-1">Τηλέφωνο</div>
+                          <input defaultValue={e.phone || ""} onChange={(ev) => updateEdit(e.id, "phone", ev.target.value)} className="w-full border border-ink/15 rounded-lg px-2 py-1.5" />
+                        </label>
+                        <label className="text-sm">
+                          <div className="text-ink/50 mb-1">Τμήμα</div>
+                          <select defaultValue={e.department || ""} onChange={(ev) => updateEdit(e.id, "department", ev.target.value)} className="w-full border border-ink/15 rounded-lg px-2 py-1.5 bg-white">
+                            {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-sm">
+                          <div className="text-ink/50 mb-1">Ομάδα</div>
+                          <select defaultValue={e.shiftGroup || ""} onChange={(ev) => updateEdit(e.id, "shiftGroup", ev.target.value)} className="w-full border border-ink/15 rounded-lg px-2 py-1.5 bg-white">
+                            {groupsForDepartment(edits.department ?? e.department ?? "").map((g) => <option key={g} value={g}>{g}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-sm">
+                          <div className="text-ink/50 mb-1">Βαθμός</div>
+                          <select defaultValue={e.rank || ""} onChange={(ev) => updateEdit(e.id, "rank", ev.target.value)} className="w-full border border-ink/15 rounded-lg px-2 py-1.5 bg-white">
+                            {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-sm">
+                          <div className="text-ink/50 mb-1">Κατηγορία</div>
+                          <select defaultValue={e.employeeType} onChange={(ev) => updateEdit(e.id, "employeeType", ev.target.value)} className="w-full border border-ink/15 rounded-lg px-2 py-1.5 bg-white">
+                            <option value="TWP">Τ.Ω.Π.</option>
+                            <option value="PERMANENT">Μόνιμος</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div>
+                        <div className="text-sm text-ink/50 mb-1">Προσόντα</div>
+                        <div className="flex flex-wrap gap-2">
+                          {QUALIFICATIONS.map((q) => {
+                            const active = (edits.qualifications ?? e.qualifications).includes(q);
+                            return (
+                              <button key={q} type="button" onClick={() => toggleEditQual(e.id, edits.qualifications ?? e.qualifications, q)}
+                                className={`text-xs px-2.5 py-1 rounded-full border ${active ? "bg-ink text-white border-ink" : "border-ink/20 text-ink/60"}`}>
+                                {q}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => saveEmployee(e.id)} className="text-sm px-4 py-2 rounded-lg bg-ink text-white">Αποθήκευση στοιχείων</button>
+                        <button onClick={() => resetPassword(e.id)} className="text-sm px-4 py-2 rounded-lg border border-ink/15 text-ink/70">Επαναφορά κωδικού</button>
+                      </div>
+                      {resetMsg[e.id] && <div className="text-xs text-teal">{resetMsg[e.id]}</div>}
+
+                      <div className="border-t border-ink/10 pt-3">
+                        <div className="text-sm text-ink/50 mb-2">Προσαρμογή υπολοίπου</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select value={adjustCat[e.id] || ""} onChange={(ev) => setAdjustCat((c) => ({ ...c, [e.id]: ev.target.value }))} className="border border-ink/15 rounded-lg px-2 py-1.5 text-sm bg-white">
+                            <option value="">Κατηγορία</option>
+                            {isPermanent ? (
+                              <>
+                                <option value="DAYS_LEAVE">Άδεια (ημέρες)</option>
+                                <option value="DAYS_DAYOFF">Ημεραργία (ημέρες)</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="OVERTIME">Υπερωρίες (ώρες)</option>
+                                <option value="HOLIDAYS">Αργίες (ώρες)</option>
+                                <option value="ANNUAL">Έτους (ώρες)</option>
+                                <option value="ACCUMULATED">Συσσωρευμένη (ώρες)</option>
+                              </>
+                            )}
+                          </select>
+                          <input type="number" placeholder="+/-" value={adjustAmt[e.id] || ""} onChange={(ev) => setAdjustAmt((a) => ({ ...a, [e.id]: ev.target.value }))}
+                            className="w-24 border border-ink/15 rounded-lg px-2 py-1.5 text-sm font-mono" />
+                          <button onClick={() => applyAdjust(e.id)} className="text-sm px-3 py-1.5 rounded-lg bg-teal text-white">Εφαρμογή</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
+              );
+            })}
+            {employees.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
+          </div>
+        </div>
+      )}
+
+      {tab === "swaps" && (
+        <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+          {swaps.length === 0 && <div className="p-4 text-sm text-ink/40">Δεν υπάρχουν αιτήματα ανταλλαγής.</div>}
+          {swaps.map((s) => (
+            <div key={s.id} className="p-4 flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2 text-sm">
+                <Repeat size={15} className="text-ink/40" />
+                <span className="font-medium">{fmt(s.date)}</span>
+                <span className="text-ink/50">{s.requester.name} ↔ {s.colleague.name}</span>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <select
-                  value={groupEdit[e.id] ?? e.shiftGroup ?? ""}
-                  onChange={(ev) => setGroupEdit((g) => ({ ...g, [e.id]: ev.target.value }))}
-                  className="border border-ink/15 rounded-lg px-2 py-1.5 text-sm bg-white"
-                >
-                  {groupsForDepartment(e.department || "").map((g) => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
-                </select>
-                <button onClick={() => saveGroup(e.id)} className="text-sm px-3 py-1.5 rounded-lg border border-ink/15 text-ink/70">
-                  Αποθήκευση ομάδας
-                </button>
-                <input
-                  type="number"
-                  placeholder="ώρες +/-"
-                  value={adjustAmt[e.id] || ""}
-                  onChange={(ev) => setAdjustAmt((a) => ({ ...a, [e.id]: ev.target.value }))}
-                  className="w-24 border border-ink/15 rounded-lg px-2 py-1.5 text-sm font-mono"
-                />
-                <button onClick={() => applyAdjust(e.id)} className="text-sm px-3 py-1.5 rounded-lg bg-ink text-white">
-                  Εφαρμογή
-                </button>
+              <div className="flex items-center gap-2">
+                <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ background: swapBadge[s.status].bg, color: swapBadge[s.status].fg }}>
+                  {swapBadge[s.status].label}
+                </span>
+                {s.status === "COLLEAGUE_ACCEPTED" && (
+                  <>
+                    <button onClick={() => decideSwap(s.id, "ADMIN_REJECTED")} className="text-xs px-2 py-1 rounded-lg border border-brick/30 text-brick">Απόρριψη</button>
+                    <button onClick={() => decideSwap(s.id, "APPROVED")} className="text-xs px-2 py-1 rounded-lg bg-teal text-white">Έγκριση</button>
+                  </>
+                )}
               </div>
             </div>
           ))}
-          {employees.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
         </div>
       )}
 
@@ -533,9 +632,7 @@ export default function AdminPage() {
               <label className="text-sm">
                 <div className="text-ink/50 mb-1">Τμήμα</div>
                 <select value={absDept} onChange={(e) => setAbsDept(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
-                  {DEPARTMENTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
+                  {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </label>
               <label className="text-sm">
@@ -561,7 +658,6 @@ export default function AdminPage() {
             {absError && <div className="text-sm text-brick">{absError}</div>}
             <button type="submit" className="bg-teal text-white rounded-lg px-4 py-2 text-sm font-medium">Προσθήκη</button>
           </form>
-
           <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
             {absences.length === 0 && <div className="p-4 text-sm text-ink/40">Δεν υπάρχουν καταχωρημένες απουσίες.</div>}
             {absences.map((a) => (
@@ -572,9 +668,7 @@ export default function AdminPage() {
                   <span className="text-ink/50">{a.type === "DOCTOR" ? "Άδεια ιατρού" : "Εκπαίδευση"} · {a.count} άτομα</span>
                   <span className="text-ink/40 font-mono text-xs">{fmt(a.startDate)} – {fmt(a.endDate)}</span>
                 </div>
-                <button onClick={() => removeAbsence(a.id)} className="text-ink/40 hover:text-brick">
-                  <Trash2 size={16} />
-                </button>
+                <button onClick={() => removeAbsence(a.id)} className="text-ink/40 hover:text-brick"><Trash2 size={16} /></button>
               </div>
             ))}
           </div>
@@ -590,24 +684,18 @@ export default function AdminPage() {
                   <div className="font-medium">{c.department}</div>
                   <div className="text-xs text-ink/40">Ομάδες: {c.groups.join(" → ")} → (ξανά η πρώτη)</div>
                 </div>
-                <div className="text-sm">
-                  Σήμερα δουλεύει: <span className="font-mono font-medium text-teal">{c.workingGroup}</span>
-                </div>
+                <div className="text-sm">Σήμερα δουλεύει: <span className="font-mono font-medium text-teal">{c.workingGroup}</span></div>
               </div>
             ))}
             {shiftCycles.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
           </div>
-
           <form onSubmit={fixShiftCycle} className="bg-white rounded-xl border border-ink/10 p-5 space-y-3">
             <div className="font-disp text-lg flex items-center gap-2"><RefreshCw size={18} /> Διόρθωση κύκλου βάρδιας</div>
-            <div className="text-xs text-ink/40">Όρισε ότι σε συγκεκριμένη ημερομηνία δουλεύει μια συγκεκριμένη ομάδα — ο κύκλος προσαρμόζεται γύρω από αυτό.</div>
             <div className="flex flex-wrap gap-3">
               <label className="text-sm">
                 <div className="text-ink/50 mb-1">Τμήμα</div>
                 <select value={fixDept} onChange={(e) => setFixDept(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
-                  {DEPARTMENTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
+                  {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </label>
               <label className="text-sm">
@@ -617,9 +705,7 @@ export default function AdminPage() {
               <label className="text-sm">
                 <div className="text-ink/50 mb-1">Ομάδα που δουλεύει</div>
                 <select value={fixGroup} onChange={(e) => setFixGroup(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
-                  {groupsForDepartment(fixDept).map((g) => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
+                  {groupsForDepartment(fixDept).map((g) => <option key={g} value={g}>{g}</option>)}
                 </select>
               </label>
               <button type="submit" className="self-end bg-ink text-white rounded-lg px-4 py-2 text-sm">Ορισμός</button>
@@ -630,9 +716,7 @@ export default function AdminPage() {
 
       {tab === "new" && (
         <form onSubmit={createEmployee} className="bg-white rounded-xl border border-ink/10 p-5 max-w-md space-y-4">
-          <div className="font-disp text-lg flex items-center gap-2">
-            <UserPlus size={20} /> Νέος υπάλληλος
-          </div>
+          <div className="font-disp text-lg flex items-center gap-2"><UserPlus size={20} /> Νέος υπάλληλος</div>
           <label className="block text-sm">
             <div className="text-ink/50 mb-1">Ονοματεπώνυμο</div>
             <input required value={newName} onChange={(e) => setNewName(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
@@ -642,8 +726,12 @@ export default function AdminPage() {
             <input required value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" autoCapitalize="none" autoCorrect="off" />
           </label>
           <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Αρχικός κωδικός (πες του τον, μπορεί να τον αλλάξει αργότερα)</div>
+            <div className="text-ink/50 mb-1">Αρχικός κωδικός</div>
             <input required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="τουλάχιστον 6 χαρακτήρες" />
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Τηλέφωνο (8 ψηφία)</div>
+            <input required pattern="\d{8}" maxLength={8} value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ""))} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="99123456" />
           </label>
           <label className="block text-sm">
             <div className="text-ink/50 mb-1">Ρόλος</div>
@@ -653,33 +741,81 @@ export default function AdminPage() {
             </select>
           </label>
           <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Κατηγορία προσωπικού</div>
+            <select value={newEmpType} onChange={(e) => setNewEmpType(e.target.value as "PERMANENT" | "TWP")} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+              <option value="TWP">Τ.Ω.Π.</option>
+              <option value="PERMANENT">Μόνιμος</option>
+            </select>
+          </label>
+          <label className="block text-sm">
+            <div className="text-ink/50 mb-1">Βαθμός</div>
+            <select required value={newRank} onChange={(e) => setNewRank(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+              <option value="" disabled>Επίλεξε βαθμό</option>
+              {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm">
             <div className="text-ink/50 mb-1">Τμήμα</div>
             <select required value={newDept} onChange={(e) => setNewDept(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
               <option value="" disabled>Επίλεξε τμήμα</option>
-              {DEPARTMENTS.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
+              {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </label>
-          {newRole === "EMPLOYEE" && newDept && (
+          {newDept && (
             <label className="block text-sm">
               <div className="text-ink/50 mb-1">Ομάδα βάρδιας</div>
               <select value={newGroup} onChange={(e) => setNewGroup(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
-                {groupsForDepartment(newDept).map((g) => (
-                  <option key={g} value={g}>{g}</option>
-                ))}
+                {groupsForDepartment(newDept).map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
             </label>
           )}
-          <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Αρχικό υπόλοιπο άδειας (ώρες)</div>
-            <input type="number" value={newBalanceHours} onChange={(e) => setNewBalanceHours(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
-          </label>
+          <div>
+            <div className="text-sm text-ink/50 mb-1">Προσόντα</div>
+            <div className="flex flex-wrap gap-2">
+              {QUALIFICATIONS.map((q) => (
+                <button key={q} type="button" onClick={() => toggleNewQual(q)}
+                  className={`text-xs px-2.5 py-1 rounded-full border ${newQuals.includes(q) ? "bg-ink text-white border-ink" : "border-ink/20 text-ink/60"}`}>
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {newEmpType === "PERMANENT" ? (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Άδεια (ημέρες)</div>
+                <input type="number" value={newDaysLeave} onChange={(e) => setNewDaysLeave(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Ημεραργία (ημέρες)</div>
+                <input type="number" value={newDaysDayOff} onChange={(e) => setNewDaysDayOff(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Υπερωρίες (ώρες)</div>
+                <input type="number" value={newHoursOvertime} onChange={(e) => setNewHoursOvertime(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Αργίες (ώρες)</div>
+                <input type="number" value={newHoursHolidays} onChange={(e) => setNewHoursHolidays(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Έτους (ώρες)</div>
+                <input type="number" value={newHoursAnnual} onChange={(e) => setNewHoursAnnual(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Συσσωρευμένη (ώρες)</div>
+                <input type="number" value={newHoursAccumulated} onChange={(e) => setNewHoursAccumulated(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+            </div>
+          )}
+
           {newError && <div className="text-sm text-brick">{newError}</div>}
           {newSuccess && <div className="text-sm text-teal">{newSuccess}</div>}
-          <button type="submit" className="w-full bg-teal text-white rounded-lg py-2.5 font-medium">
-            Δημιουργία λογαριασμού
-          </button>
+          <button type="submit" className="w-full bg-teal text-white rounded-lg py-2.5 font-medium">Δημιουργία λογαριασμού</button>
         </form>
       )}
     </div>

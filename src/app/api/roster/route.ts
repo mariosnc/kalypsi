@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { groupsForDepartment, defaultStartingGroup, computeWorkingGroupIndex } from "@/lib/shifts";
+import { RANKS } from "@/lib/balances";
 
 const DEPARTMENTS = ["Μονιάτης", "Πελένδρι", "Αγρός", "Εφταγώνια", "Πάχνα", "Κυβίδες"];
 
@@ -21,19 +22,22 @@ export async function GET(req: NextRequest) {
 
   const day = new Date(date + "T00:00:00Z");
 
-  const [users, approvedOnDay, cycles] = await Promise.all([
+  const [users, approvedOnDay, cycles, approvedSwaps] = await Promise.all([
     prisma.user.findMany({
       orderBy: { name: "asc" },
-      select: { id: true, name: true, department: true, shiftGroup: true, role: true },
+      select: { id: true, name: true, email: true, department: true, shiftGroup: true, phone: true, qualifications: true, rank: true, role: true },
     }),
     prisma.leaveRequest.findMany({
       where: { status: "APPROVED", startDate: { lte: day }, endDate: { gte: day } },
       select: { userId: true },
     }),
     prisma.shiftCycle.findMany({ where: { department: { in: DEPARTMENTS } } }),
+    prisma.shiftSwap.findMany({ where: { status: "APPROVED", date: day } }),
   ]);
 
   const onLeaveIds = new Set(approvedOnDay.map((r) => r.userId));
+  const swapOffIds = new Set(approvedSwaps.map((s) => s.requesterId));
+  const swapCoverIds = new Set(approvedSwaps.map((s) => s.colleagueId));
 
   const workingGroupByDept: Record<string, string> = {};
   for (const dep of DEPARTMENTS) {
@@ -45,6 +49,11 @@ export async function GET(req: NextRequest) {
     workingGroupByDept[dep] = groups[idx];
   }
 
+  const rankOrder = (r: string | null) => {
+    const idx = RANKS.indexOf(r || "");
+    return idx === -1 ? RANKS.length : idx;
+  };
+
   const roster = users
     .filter((u) => u.role === "EMPLOYEE")
     .map((u) => {
@@ -52,10 +61,30 @@ export async function GET(req: NextRequest) {
       const dept = u.department || "";
       const workingGroup = workingGroupByDept[dept];
       const onShift = !workingGroup || u.shiftGroup === workingGroup;
-      let status: "leave" | "off_shift" | "working" = "working";
-      if (onLeave) status = "leave";
-      else if (!onShift) status = "off_shift";
-      return { ...u, onLeave, onShift, workingGroup, status };
+
+      // "OFF" = εκτός βάρδιας λόγω κύκλου εργασίας (σαν υπερωρία/ρεπό βάρδιας)
+      // "Άδεια" = οποιαδήποτε άλλη περίπτωση απουσίας (κανονική άδεια, ημεραργία, κάλυψη από συνάδελφο)
+      let status: "working" | "off" | "on_leave" = "working";
+      if (swapCoverIds.has(u.id)) status = "working";
+      else if (onLeave || swapOffIds.has(u.id)) status = "on_leave";
+      else if (!onShift) status = "off";
+
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        department: u.department,
+        rank: u.rank,
+        shiftGroup: u.shiftGroup,
+        phone: u.phone,
+        qualifications: u.qualifications,
+        status,
+      };
+    })
+    .sort((a, b) => {
+      const depCompare = (a.department || "").localeCompare(b.department || "", "el");
+      if (depCompare !== 0) return depCompare;
+      return rankOrder(a.rank) - rankOrder(b.rank);
     });
 
   return NextResponse.json({

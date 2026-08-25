@@ -2,19 +2,23 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { PlusCircle, Send, LogOut, AlertTriangle, KeyRound } from "lucide-react";
+import { PlusCircle, Send, LogOut, AlertTriangle, KeyRound, Repeat } from "lucide-react";
 
-type Me = { id: string; name: string; role: string; department: string | null; balanceHours: number };
+type Me = {
+  id: string; name: string; role: string; department: string | null; employeeType: "PERMANENT" | "TWP";
+  hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
+  daysLeave: number; daysDayOff: number;
+};
 type Req = {
-  id: string;
-  startDate: string;
-  endDate: string;
-  hours: number;
-  status: string;
-  createdAt: string;
-  rejectionReason?: string | null;
+  id: string; startDate: string; endDate: string; hours: number; days?: number | null;
+  leaveType?: string | null; status: string; createdAt: string; rejectionReason?: string | null;
 };
 type CoverageDay = { date: string; byDept: Record<string, number> };
+type Colleague = { id: string; name: string };
+type Swap = {
+  id: string; date: string; status: string;
+  requester: { id: string; name: string }; colleague: { id: string; name: string };
+};
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
 
@@ -24,6 +28,14 @@ const badge: Record<string, { label: string; bg: string; fg: string }> = {
   REJECTED: { label: "Απορρίφθηκε", bg: "#A8453A1A", fg: "#A8453A" },
 };
 
+const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
+  PENDING: { label: "Αναμονή συναδέλφου", bg: "#C97A2E1A", fg: "#C97A2E" },
+  COLLEAGUE_ACCEPTED: { label: "Αναμονή διαχειριστή", bg: "#C97A2E1A", fg: "#C97A2E" },
+  COLLEAGUE_DECLINED: { label: "Απορρίφθηκε από συνάδελφο", bg: "#A8453A1A", fg: "#A8453A" },
+  ADMIN_REJECTED: { label: "Απορρίφθηκε από διαχειριστή", bg: "#A8453A1A", fg: "#A8453A" },
+  APPROVED: { label: "Εγκρίθηκε", bg: "#2F6F5E1A", fg: "#2F6F5E" },
+};
+
 export default function Dashboard() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
@@ -31,6 +43,7 @@ export default function Dashboard() {
   const [showForm, setShowForm] = useState(false);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [leaveType, setLeaveType] = useState<"LEAVE" | "DAYOFF">("LEAVE");
   const [error, setError] = useState("");
   const [coverageWarning, setCoverageWarning] = useState("");
 
@@ -40,17 +53,30 @@ export default function Dashboard() {
   const [passMsg, setPassMsg] = useState("");
   const [passError, setPassError] = useState("");
 
+  const [colleagues, setColleagues] = useState<Colleague[]>([]);
+  const [swaps, setSwaps] = useState<Swap[]>([]);
+  const [showSwapForm, setShowSwapForm] = useState(false);
+  const [swapColleague, setSwapColleague] = useState("");
+  const [swapDate, setSwapDate] = useState("");
+  const [swapError, setSwapError] = useState("");
+
   const load = useCallback(async () => {
     const [meRes, reqRes] = await Promise.all([fetch("/api/me"), fetch("/api/requests")]);
     if (meRes.ok) setMe(await meRes.json());
     if (reqRes.ok) setRequests(await reqRes.json());
   }, []);
 
+  const loadSwaps = useCallback(async () => {
+    const [colRes, swapRes] = await Promise.all([fetch("/api/colleagues"), fetch("/api/swaps")]);
+    if (colRes.ok) setColleagues(await colRes.json());
+    if (swapRes.ok) setSwaps(await swapRes.json());
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadSwaps();
+  }, [load, loadSwaps]);
 
-  // live check: αν το επιλεγμένο εύρος ρίχνει την κάλυψη του τμήματός μου κάτω από το ελάχιστο
   useEffect(() => {
     async function check() {
       setCoverageWarning("");
@@ -79,7 +105,7 @@ export default function Dashboard() {
 
       if (conflictDays.length > 0) {
         setCoverageWarning(
-          `Στις παρακάτω ημέρες το τμήμα σου είναι ήδη στο (ή κοντά στο) ελάχιστο προσωπικό — η αίτηση μπορεί να χρειαστεί ιδιαίτερη έγκριση: ${conflictDays.join(", ")}`
+          `Στις παρακάτω ημέρες το τμήμα σου είναι ήδη στο (ή κοντά στο) ελάχιστο προσωπικό — η αίτηση μπορεί να χρειαστεί ιδιαίτερη έγκριση, ή μπορείς να ζητήσεις αλλαγή βάρδιας με συνάδελφο: ${conflictDays.join(", ")}`
         );
       }
     }
@@ -89,10 +115,12 @@ export default function Dashboard() {
   async function submitRequest(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    const body: any = { startDate: start, endDate: end };
+    if (me?.employeeType === "PERMANENT") body.leaveType = leaveType;
     const res = await fetch("/api/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ startDate: start, endDate: end }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -104,6 +132,35 @@ export default function Dashboard() {
     setEnd("");
     setCoverageWarning("");
     load();
+  }
+
+  async function submitSwap(e: React.FormEvent) {
+    e.preventDefault();
+    setSwapError("");
+    if (!swapColleague || !swapDate) return;
+    const res = await fetch("/api/swaps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ colleagueId: swapColleague, date: swapDate }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setSwapError(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    setShowSwapForm(false);
+    setSwapColleague("");
+    setSwapDate("");
+    loadSwaps();
+  }
+
+  async function respondSwap(id: string, response: "ACCEPT" | "DECLINE") {
+    await fetch(`/api/swaps/${id}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ response }),
+    });
+    loadSwaps();
   }
 
   async function changePassword(e: React.FormEvent) {
@@ -132,7 +189,8 @@ export default function Dashboard() {
 
   if (!me) return <div className="p-8 text-ink/50">Φόρτωση...</div>;
 
-  const approxDays = me.balanceHours / 8;
+  const isPermanent = me.employeeType === "PERMANENT";
+  const totalHours = me.hoursOvertime + me.hoursHolidays + me.hoursAnnual + me.hoursAccumulated;
 
   return (
     <div className="max-w-3xl mx-auto px-5 py-6 space-y-5">
@@ -165,29 +223,61 @@ export default function Dashboard() {
         </form>
       )}
 
-      <div className="grid sm:grid-cols-3 gap-4">
-        <div className="sm:col-span-2 bg-white rounded-xl border border-ink/10 p-5 flex items-center justify-between">
-          <div>
-            <div className="text-sm text-ink/50 mb-1">Γεια σου, {me.name.split(" ")[0]}</div>
-            <div className="font-disp text-3xl">Το υπόλοιπό σου</div>
+      <div className="text-sm text-ink/50">
+        Γεια σου, {me.name.split(" ")[0]} · {isPermanent ? "Μόνιμος" : "Τ.Ω.Π."}
+      </div>
+
+      {isPermanent ? (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl border border-ink/10 p-5">
+            <div className="text-sm text-ink/50 mb-1">Άδεια</div>
+            <div className="font-disp text-3xl font-mono">{me.daysLeave}</div>
+            <div className="text-xs text-ink/40">ημέρες</div>
           </div>
-          <div className="text-right">
-            <div className="font-disp text-4xl font-mono">{me.balanceHours}</div>
-            <div className="text-xs text-ink/50">ώρες · ≈{approxDays.toFixed(1)} ημέρες</div>
+          <div className="bg-white rounded-xl border border-ink/10 p-5">
+            <div className="text-sm text-ink/50 mb-1">Ημεραργία</div>
+            <div className="font-disp text-3xl font-mono">{me.daysDayOff}</div>
+            <div className="text-xs text-ink/40">ημέρες</div>
           </div>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-teal text-white rounded-xl p-5 flex flex-col items-start justify-between hover:opacity-90 transition"
-        >
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            ["Υπερωρίες", me.hoursOvertime],
+            ["Αργίες", me.hoursHolidays],
+            ["Έτους", me.hoursAnnual],
+            ["Συσσωρευμένη", me.hoursAccumulated],
+          ].map(([label, val]) => (
+            <div key={label as string} className="bg-white rounded-xl border border-ink/10 p-4">
+              <div className="text-xs text-ink/50 mb-1">{label}</div>
+              <div className="font-disp text-2xl font-mono">{val}</div>
+              <div className="text-[10px] text-ink/40">ώρες</div>
+            </div>
+          ))}
+          <div className="col-span-2 sm:col-span-4 text-xs text-ink/40">Σύνολο: <span className="font-mono">{totalHours}</span> ώρες</div>
+        </div>
+      )}
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <button onClick={() => setShowForm(true)} className="bg-teal text-white rounded-xl p-5 flex flex-col items-start justify-between hover:opacity-90 transition">
           <PlusCircle size={22} />
           <span className="text-left font-medium">Νέα αίτηση άδειας</span>
+        </button>
+        <button onClick={() => setShowSwapForm(true)} className="bg-ink text-white rounded-xl p-5 flex flex-col items-start justify-between hover:opacity-90 transition">
+          <Repeat size={22} />
+          <span className="text-left font-medium">Αίτημα αλλαγής βάρδιας</span>
         </button>
       </div>
 
       {showForm && (
         <form onSubmit={submitRequest} className="bg-white rounded-xl border border-ink/10 p-5">
           <div className="font-disp text-lg mb-3">Αίτηση άδειας</div>
+          {isPermanent && (
+            <div className="flex gap-2 mb-3">
+              <button type="button" onClick={() => setLeaveType("LEAVE")} className={`text-sm px-3 py-1.5 rounded-full ${leaveType === "LEAVE" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Άδεια</button>
+              <button type="button" onClick={() => setLeaveType("DAYOFF")} className={`text-sm px-3 py-1.5 rounded-full ${leaveType === "DAYOFF" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Ημεραργία</button>
+            </div>
+          )}
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm">
               <div className="text-ink/50 mb-1">Από</div>
@@ -200,9 +290,7 @@ export default function Dashboard() {
             <button type="submit" className="bg-ink text-white rounded-lg px-4 py-2 flex items-center gap-2">
               <Send size={15} /> Υποβολή
             </button>
-            <button type="button" onClick={() => setShowForm(false)} className="text-ink/50 px-3 py-2">
-              Ακύρωση
-            </button>
+            <button type="button" onClick={() => setShowForm(false)} className="text-ink/50 px-3 py-2">Ακύρωση</button>
           </div>
           {error && <div className="text-sm text-brick mt-2">{error}</div>}
           {coverageWarning && (
@@ -212,9 +300,68 @@ export default function Dashboard() {
             </div>
           )}
           <div className="text-xs text-ink/40 mt-2">
-            Οι ώρες υπολογίζονται αυτόματα: 10 ώρες τη Δευτέρα, 11 ώρες όλες τις άλλες ημέρες (και Σαββατοκύριακα).
+            {isPermanent
+              ? "Η άδεια υπολογίζεται σε ημέρες."
+              : "Οι ώρες υπολογίζονται αυτόματα: 10 ώρες τη Δευτέρα, 11 ώρες όλες τις άλλες ημέρες (και Σαββατοκύριακα)."}
           </div>
         </form>
+      )}
+
+      {showSwapForm && (
+        <form onSubmit={submitSwap} className="bg-white rounded-xl border border-ink/10 p-5">
+          <div className="font-disp text-lg mb-3">Αίτημα αλλαγής βάρδιας</div>
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className="text-sm">
+              <div className="text-ink/50 mb-1">Συνάδελφος</div>
+              <select required value={swapColleague} onChange={(e) => setSwapColleague(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                <option value="">Επίλεξε</option>
+                {colleagues.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <div className="text-ink/50 mb-1">Ημερομηνία</div>
+              <input type="date" required value={swapDate} onChange={(e) => setSwapDate(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+            </label>
+            <button type="submit" className="bg-ink text-white rounded-lg px-4 py-2 flex items-center gap-2">
+              <Send size={15} /> Αίτημα
+            </button>
+            <button type="button" onClick={() => setShowSwapForm(false)} className="text-ink/50 px-3 py-2">Ακύρωση</button>
+          </div>
+          {swapError && <div className="text-sm text-brick mt-2">{swapError}</div>}
+          <div className="text-xs text-ink/40 mt-2">Ο συνάδελφος θα καλύψει τη βάρδια σου εκείνη τη μέρα. Χρειάζεται τη συναίνεσή του και έγκριση διαχειριστή.</div>
+        </form>
+      )}
+
+      {swaps.length > 0 && (
+        <div>
+          <div className="font-disp text-lg mb-2">Αλλαγές βάρδιας</div>
+          <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+            {swaps.map((s) => {
+              const iAmColleague = s.colleague.id === me.id;
+              return (
+                <div key={s.id} className="p-4 flex items-center justify-between flex-wrap gap-2">
+                  <div className="text-sm">
+                    <div className="font-medium">{fmt(s.date)}</div>
+                    <div className="text-ink/50 text-xs">{s.requester.name} ↔ {s.colleague.name}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ background: swapBadge[s.status].bg, color: swapBadge[s.status].fg }}>
+                      {swapBadge[s.status].label}
+                    </span>
+                    {iAmColleague && s.status === "PENDING" && (
+                      <>
+                        <button onClick={() => respondSwap(s.id, "ACCEPT")} className="text-xs px-2 py-1 rounded-lg bg-teal text-white">Αποδοχή</button>
+                        <button onClick={() => respondSwap(s.id, "DECLINE")} className="text-xs px-2 py-1 rounded-lg bg-brick text-white">Άρνηση</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       <div>
@@ -226,21 +373,16 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-medium">
-                    {fmt(r.startDate)} – {fmt(r.endDate)}
+                    {fmt(r.startDate)} – {fmt(r.endDate)} {r.leaveType && <span className="text-ink/40 font-normal">({r.leaveType === "DAYOFF" ? "Ημεραργία" : "Άδεια"})</span>}
                   </div>
-                  <div className="text-xs text-ink/40 font-mono">{r.hours} ώρες</div>
+                  <div className="text-xs text-ink/40 font-mono">{r.days ? `${r.days} ημέρες` : `${r.hours} ώρες`}</div>
                 </div>
-                <span
-                  className="text-xs px-2 py-1 rounded-full font-medium"
-                  style={{ background: badge[r.status].bg, color: badge[r.status].fg }}
-                >
+                <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ background: badge[r.status].bg, color: badge[r.status].fg }}>
                   {badge[r.status].label}
                 </span>
               </div>
               {r.status === "REJECTED" && r.rejectionReason && (
-                <div className="mt-2 text-xs text-brick bg-brick/5 rounded-lg p-2">
-                  Αιτιολόγηση: {r.rejectionReason}
-                </div>
+                <div className="mt-2 text-xs text-brick bg-brick/5 rounded-lg p-2">Αιτιολόγηση: {r.rejectionReason}</div>
               )}
             </div>
           ))}
