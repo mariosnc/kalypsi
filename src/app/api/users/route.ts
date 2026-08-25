@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { groupsForDepartment } from "@/lib/shifts";
 
 export async function GET() {
   const session = await getSession();
@@ -12,7 +13,7 @@ export async function GET() {
   const users = await prisma.user.findMany({
     where: { role: "EMPLOYEE" },
     orderBy: { name: "asc" },
-    select: { id: true, name: true, email: true, department: true, balanceHours: true },
+    select: { id: true, name: true, email: true, department: true, shiftGroup: true, balanceHours: true },
   });
 
   return NextResponse.json(users);
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να προσθέσει χρήστη." }, { status: 403 });
   }
 
-  const { name, email, password, department, balanceHours, role } = await req.json();
+  const { name, email, password, department, balanceHours, role, shiftGroup } = await req.json();
 
   if (!name || !email || !password || !department) {
     return NextResponse.json({ error: "Λείπει όνομα, όνομα χρήστη, κωδικός ή τμήμα." }, { status: 400 });
@@ -37,6 +38,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Το όνομα χρήστη μπορεί να έχει μόνο λατινικά γράμματα, αριθμούς, τελείες, παύλες." }, { status: 400 });
   }
   const finalRole = role === "ADMIN" ? "ADMIN" : "EMPLOYEE";
+
+  const validGroups = groupsForDepartment(department);
+  if (finalRole === "EMPLOYEE" && !validGroups.includes(shiftGroup)) {
+    return NextResponse.json({ error: "Επίλεξε έγκυρη ομάδα για αυτό το τμήμα." }, { status: 400 });
+  }
 
   const existing = await prisma.user.findUnique({ where: { email: username } });
   if (existing) {
@@ -51,13 +57,14 @@ export async function POST(req: NextRequest) {
       email: username,
       passwordHash,
       department,
+      shiftGroup: finalRole === "EMPLOYEE" ? shiftGroup : null,
       balanceHours: Math.round(Number(balanceHours || 0)),
       role: finalRole,
     },
   });
 
   return NextResponse.json(
-    { id: user.id, name: user.name, email: user.email, department: user.department, balanceHours: user.balanceHours },
+    { id: user.id, name: user.name, email: user.email, department: user.department, shiftGroup: user.shiftGroup, balanceHours: user.balanceHours },
     { status: 201 }
   );
 }

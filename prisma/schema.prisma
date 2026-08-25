@@ -31,6 +31,7 @@ model User {
   name         String
   role         Role     @default(EMPLOYEE)
   department   String?
+  shiftGroup   String?
   balanceHours Int      @default(0)
   createdAt    DateTime @default(now())
 
@@ -83,4 +84,12 @@ model StaffAbsence {
   createdAt  DateTime    @default(now())
 
   @@index([department])
+}
+
+// Σημείο αναφοράς του κυκλικού κύκλου βαρδιών ανά τμήμα
+model ShiftCycle {
+  id               String   @id @default(cuid())
+  department       String   @unique
+  anchorDate       DateTime
+  anchorGroupIndex Int      @default(0)
 }
