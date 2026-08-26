@@ -31,6 +31,14 @@ type SwapRow = { id: string; date: string; status: string; requester: { id: stri
 const DEPARTMENTS = ["Μονιάτης", "Πελένδρι", "Αγρός", "Εφταγώνια", "Πάχνα", "Κυβίδες"];
 const QUALIFICATIONS = ["ΟΔ/ΑΣ", "ΟΔ", "ΑΣ", "οδ/ΑΣ", "οδ"];
 const RANKS = ["Πυρ/μος", "Α/Π", "Δ/Πυρ.", "Ε/Π"];
+
+function sortByRankThenUsername<T extends { rank?: string | null; email: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const rankCompare = RANKS.indexOf(a.rank || "") - RANKS.indexOf(b.rank || "");
+    if (rankCompare !== 0) return rankCompare;
+    return a.email.localeCompare(b.email);
+  });
+}
 const groupsForDepartment = (dept: string) => (dept === "Μονιάτης" ? ["Πράσινη", "Ερυθρά", "Κυανή", "Λευκή"] : ["Α", "Β"]);
 const effectiveKey = (dept: string, shiftType?: string | null) =>
   dept === "Μονιάτης" ? `Μονιάτης (${shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : dept;
@@ -712,9 +720,7 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows
-                      .sort((a, b) => RANKS.indexOf(a.rank || "") - RANKS.indexOf(b.rank || ""))
-                      .map((e) => (
+                    {sortByRankThenUsername(rows).map((e) => (
                         <tr key={e.id} className="border-b border-ink/5">
                           <td className="py-2 text-ink/50">{e.rank}</td>
                           <td className="py-2 font-mono text-xs">{e.email}</td>
@@ -819,7 +825,7 @@ export default function AdminPage() {
             </button>
           </div>
           <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
-            {employees.map((e) => {
+            {sortByRankThenUsername(employees).map((e) => {
               const edits = empEdit[e.id] || {};
               const isPermanent = (edits.employeeType ?? e.employeeType) === "PERMANENT";
               const expanded = expandedEmp === e.id;
