@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { computeLeaveHours } from "@/lib/date";
 import { groupsForDepartment, defaultStartingGroup, dayNightGroups } from "@/lib/shifts";
+import { deductCascading } from "@/lib/balances";
 
 function inclusiveDayCount(startISO: string, endISO: string): number {
   const s = new Date(startISO + "T00:00:00Z");
@@ -20,9 +21,10 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Μη εξουσιοδοτημένος." }, { status: 401 });
 
   const status = req.nextUrl.searchParams.get("status") || undefined;
+  const mine = req.nextUrl.searchParams.get("mine") === "1";
 
   const where: any = {};
-  if (session.role !== "ADMIN") where.userId = session.sub;
+  if (session.role !== "ADMIN" || mine) where.userId = session.sub;
   if (status) where.status = status;
 
   const requests = await prisma.leaveRequest.findMany({
@@ -65,6 +67,10 @@ export async function POST(req: NextRequest) {
   const user = await prisma.user.findUnique({ where: { id: session.sub } });
   if (!user) return NextResponse.json({ error: "Δεν βρέθηκε χρήστης." }, { status: 404 });
 
+  // Οι διαχειριστές (εφόσον είναι μέλη προσωπικού) δεν χρειάζονται έγκριση — η αίτησή τους
+  // εγκρίνεται αυτόματα κατά την υποβολή και ενημερώνει κατευθείαν την ημερήσια κατάσταση.
+  const autoApprove = user.role === "ADMIN";
+
   let finalShiftType: "DAY" | "NIGHT" | null = null;
   if (user.department === "Μονιάτης") {
     finalShiftType = await computeMoniatisShiftType(user.shiftGroup, startDate);
@@ -75,18 +81,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Επίλεξε τύπο: Άδεια ή Ημεραργία." }, { status: 400 });
     }
     const days = inclusiveDayCount(startDate, endDate);
-    const created = await prisma.leaveRequest.create({
-      data: {
-        userId: session.sub,
-        startDate: new Date(startDate + "T00:00:00Z"),
-        endDate: new Date(endDate + "T00:00:00Z"),
-        hours: 0,
-        days,
-        leaveType,
-        shiftType: finalShiftType,
-        status: "PENDING",
-      },
+
+    const created = await prisma.$transaction(async (tx) => {
+      const req = await tx.leaveRequest.create({
+        data: {
+          userId: session.sub,
+          startDate: new Date(startDate + "T00:00:00Z"),
+          endDate: new Date(endDate + "T00:00:00Z"),
+          hours: 0,
+          days,
+          leaveType,
+          shiftType: finalShiftType,
+          status: autoApprove ? "APPROVED" : "PENDING",
+          decidedAt: autoApprove ? new Date() : null,
+        },
+      });
+      if (autoApprove) {
+        if (leaveType === "DAYOFF") {
+          await tx.user.update({ where: { id: user.id }, data: { daysDayOff: { decrement: days } } });
+        } else {
+          await tx.user.update({ where: { id: user.id }, data: { daysLeave: { decrement: days } } });
+        }
+      }
+      return req;
     });
+
     return NextResponse.json(created, { status: 201 });
   }
 
@@ -95,15 +114,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Μη έγκυρο εύρος." }, { status: 400 });
   }
 
-  const created = await prisma.leaveRequest.create({
-    data: {
-      userId: session.sub,
-      startDate: new Date(startDate + "T00:00:00Z"),
-      endDate: new Date(endDate + "T00:00:00Z"),
-      hours,
-      shiftType: finalShiftType,
-      status: "PENDING",
-    },
+  const created = await prisma.$transaction(async (tx) => {
+    const req = await tx.leaveRequest.create({
+      data: {
+        userId: session.sub,
+        startDate: new Date(startDate + "T00:00:00Z"),
+        endDate: new Date(endDate + "T00:00:00Z"),
+        hours,
+        shiftType: finalShiftType,
+        status: autoApprove ? "APPROVED" : "PENDING",
+        decidedAt: autoApprove ? new Date() : null,
+      },
+    });
+    if (autoApprove) {
+      const newBalances = deductCascading(
+        {
+          hoursOvertime: user.hoursOvertime,
+          hoursHolidays: user.hoursHolidays,
+          hoursAnnual: user.hoursAnnual,
+          hoursAccumulated: user.hoursAccumulated,
+        },
+        hours
+      );
+      await tx.user.update({ where: { id: user.id }, data: newBalances });
+    }
+    return req;
   });
 
   return NextResponse.json(created, { status: 201 });

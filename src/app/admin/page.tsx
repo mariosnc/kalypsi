@@ -87,8 +87,12 @@ const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "final" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "swaps" | "new">("pending");
-  const [me, setMe] = useState<{ id: string; name: string; finalApprover: boolean } | null>(null);
+  const [tab, setTab] = useState<"pending" | "final" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "swaps" | "myleave" | "new">("pending");
+  const [me, setMe] = useState<{
+    id: string; name: string; finalApprover: boolean; staffMember: boolean; department: string | null;
+    employeeType: "PERMANENT" | "TWP"; hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
+    daysLeave: number; daysDayOff: number; shiftGroup: string | null;
+  } | null>(null);
   const [pending, setPending] = useState<PendingReq[]>([]);
   const [finalPending, setFinalPending] = useState<PendingReq[]>([]);
   const [adminsList, setAdminsList] = useState<{ id: string; name: string; email: string; staffMember: boolean; finalApprover: boolean }[]>([]);
@@ -150,6 +154,71 @@ export default function AdminPage() {
   const [weekStart, setWeekStart] = useState(mondayOf(todayISO()));
   const [weeklyRequests, setWeeklyRequests] = useState<PendingReq[]>([]);
 
+  const [myRequests, setMyRequests] = useState<PendingReq[]>([]);
+  const [myColleagues, setMyColleagues] = useState<{ id: string; name: string }[]>([]);
+  const [mySwaps, setMySwaps] = useState<SwapRow[]>([]);
+  const [myStart, setMyStart] = useState("");
+  const [myEnd, setMyEnd] = useState("");
+  const [myLeaveType, setMyLeaveType] = useState<"LEAVE" | "DAYOFF">("LEAVE");
+  const [myError, setMyError] = useState("");
+  const [mySwapColleague, setMySwapColleague] = useState("");
+  const [mySwapDate, setMySwapDate] = useState("");
+  const [mySwapError, setMySwapError] = useState("");
+
+  const loadMyRequests = useCallback(async () => {
+    const [reqRes, colRes, swapRes] = await Promise.all([
+      fetch("/api/requests?mine=1"),
+      fetch("/api/colleagues"),
+      fetch("/api/swaps"),
+    ]);
+    if (reqRes.ok) setMyRequests(await reqRes.json());
+    if (colRes.ok) setMyColleagues(await colRes.json());
+    if (swapRes.ok) setMySwaps(await swapRes.json());
+  }, []);
+
+  async function submitMyRequest(e: React.FormEvent) {
+    e.preventDefault();
+    setMyError("");
+    const body: any = { startDate: myStart, endDate: myEnd };
+    if (me?.employeeType === "PERMANENT") body.leaveType = myLeaveType;
+    const res = await fetch("/api/requests", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMyError(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    setMyStart(""); setMyEnd("");
+    loadMyRequests(); loadMe(); loadCoverage();
+  }
+
+  async function submitMySwap(e: React.FormEvent) {
+    e.preventDefault();
+    setMySwapError("");
+    if (!mySwapColleague || !mySwapDate) return;
+    const res = await fetch("/api/swaps", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ colleagueId: mySwapColleague, date: mySwapDate }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMySwapError(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    setMySwapColleague(""); setMySwapDate("");
+    loadMyRequests();
+  }
+
+  async function respondMySwap(id: string, response: "ACCEPT" | "DECLINE") {
+    await fetch(`/api/swaps/${id}/respond`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ response }),
+    });
+    loadMyRequests();
+  }
+
   const loadPending = useCallback(async () => {
     const res = await fetch("/api/requests?status=PENDING");
     if (res.ok) setPending(await res.json());
@@ -210,6 +279,7 @@ export default function AdminPage() {
   useEffect(() => { if (tab === "general") loadEmployees(); }, [tab, loadEmployees]);
   useEffect(() => { if (tab === "weekly") loadWeekly(); }, [tab, loadWeekly]);
   useEffect(() => { if (tab === "admins") loadAdmins(); }, [tab, loadAdmins]);
+  useEffect(() => { if (tab === "myleave") loadMyRequests(); }, [tab, loadMyRequests]);
   useEffect(() => { setNewGroup(groupsForDepartment(newDept)[0] || ""); }, [newDept]);
   useEffect(() => { setFixGroup(groupsForDepartment(fixDept)[0] || ""); }, [fixDept]);
 
@@ -422,6 +492,7 @@ export default function AdminPage() {
           ["absences", "Ιατρού / Εκπαίδευση"],
           ["shifts", "Βάρδιες"],
           ...(me?.finalApprover ? [["admins", "Διαχειριστές"]] : []),
+          ...(me?.staffMember ? [["myleave", "Η άδειά μου"]] : []),
           ["new", "Νέος υπάλληλος"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key as any)}
@@ -1086,6 +1157,126 @@ export default function AdminPage() {
             ))}
             {adminsList.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
           </div>
+        </div>
+      )}
+
+      {tab === "myleave" && me && (
+        <div className="space-y-5 max-w-2xl">
+          <div className="text-sm text-ink/50 bg-white rounded-xl border border-ink/10 p-3">
+            Ως μέλος προσωπικού μπορείς να υποβάλλεις τη δική σου αίτηση άδειας ή αίτημα αλλαγής βάρδιας.
+            Δεν χρειάζεται έγκριση από άλλον διαχειριστή — καταχωρείται κατευθείαν και ενημερώνει την ημερήσια κατάσταση.
+          </div>
+
+          {me.employeeType === "PERMANENT" ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white rounded-xl border border-ink/10 p-4">
+                <div className="text-sm text-ink/50 mb-1">Άδεια</div>
+                <div className="font-disp text-2xl font-mono">{me.daysLeave} <span className="text-sm font-normal text-ink/40">ημέρες</span></div>
+              </div>
+              <div className="bg-white rounded-xl border border-ink/10 p-4">
+                <div className="text-sm text-ink/50 mb-1">Ημεραργία</div>
+                <div className="font-disp text-2xl font-mono">{me.daysDayOff} <span className="text-sm font-normal text-ink/40">ημέρες</span></div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[["Υπερωρίες", me.hoursOvertime], ["Αργίες", me.hoursHolidays], ["Έτους", me.hoursAnnual], ["Συσσωρευμένη", me.hoursAccumulated]].map(([label, val]) => (
+                <div key={label as string} className="bg-white rounded-xl border border-ink/10 p-4">
+                  <div className="text-xs text-ink/50 mb-1">{label}</div>
+                  <div className="font-disp text-xl font-mono">{val}</div>
+                  <div className="text-[10px] text-ink/40">ώρες</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={submitMyRequest} className="bg-white rounded-xl border border-ink/10 p-5 space-y-3">
+            <div className="font-disp text-lg">Νέα αίτηση άδειας</div>
+            {me.employeeType === "PERMANENT" && (
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setMyLeaveType("LEAVE")} className={`text-sm px-3 py-1.5 rounded-full ${myLeaveType === "LEAVE" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Άδεια</button>
+                <button type="button" onClick={() => setMyLeaveType("DAYOFF")} className={`text-sm px-3 py-1.5 rounded-full ${myLeaveType === "DAYOFF" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Ημεραργία</button>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Από</div>
+                <input type="date" required value={myStart} onChange={(e) => setMyStart(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Έως</div>
+                <input type="date" required value={myEnd} onChange={(e) => setMyEnd(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <button type="submit" className="bg-teal text-white rounded-lg px-4 py-2 text-sm font-medium">Υποβολή</button>
+            </div>
+            {myError && <div className="text-sm text-brick">{myError}</div>}
+          </form>
+
+          <div>
+            <div className="font-disp text-lg mb-2">Οι αιτήσεις μου</div>
+            <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+              {myRequests.length === 0 && <div className="p-4 text-sm text-ink/40">Δεν υπάρχουν αιτήσεις ακόμα.</div>}
+              {myRequests.map((r) => (
+                <div key={r.id} className="p-4 flex items-center justify-between">
+                  <div className="text-sm">
+                    <div className="font-medium">{fmt(r.startDate)} – {fmt(r.endDate)} {r.leaveType && <span className="text-ink/40 font-normal">({r.leaveType === "DAYOFF" ? "Ημεραργία" : "Άδεια"})</span>}</div>
+                    <div className="text-xs text-ink/40 font-mono">{r.days ? `${r.days} ημέρες` : `${r.hours} ώρες`}</div>
+                  </div>
+                  <span className="text-xs px-2 py-1 rounded-full font-medium bg-teal/10 text-teal">Εγκρίθηκε</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <form onSubmit={submitMySwap} className="bg-white rounded-xl border border-ink/10 p-5 space-y-3">
+            <div className="font-disp text-lg">Αίτημα αλλαγής βάρδιας</div>
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Συνάδελφος</div>
+                <select required value={mySwapColleague} onChange={(e) => setMySwapColleague(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                  <option value="">Επίλεξε</option>
+                  {myColleagues.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Ημερομηνία</div>
+                <input type="date" required value={mySwapDate} onChange={(e) => setMySwapDate(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <button type="submit" className="bg-ink text-white rounded-lg px-4 py-2 text-sm">Αίτημα</button>
+            </div>
+            {mySwapError && <div className="text-sm text-brick">{mySwapError}</div>}
+            <div className="text-xs text-ink/40">Χρειάζεται μόνο τη συναίνεση του συναδέλφου — εγκρίνεται αυτόματα μόλις αποδεχτεί.</div>
+          </form>
+
+          {mySwaps.length > 0 && (
+            <div>
+              <div className="font-disp text-lg mb-2">Οι ανταλλαγές μου</div>
+              <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+                {mySwaps.map((s) => {
+                  const iAmColleague = s.colleague.id === me.id;
+                  return (
+                    <div key={s.id} className="p-4 flex items-center justify-between flex-wrap gap-2">
+                      <div className="text-sm">
+                        <div className="font-medium">{fmt(s.date)}</div>
+                        <div className="text-ink/50 text-xs">{s.requester.name} ↔ {s.colleague.name}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ background: swapBadge[s.status].bg, color: swapBadge[s.status].fg }}>
+                          {swapBadge[s.status].label}
+                        </span>
+                        {iAmColleague && s.status === "PENDING" && (
+                          <>
+                            <button onClick={() => respondMySwap(s.id, "ACCEPT")} className="text-xs px-2 py-1 rounded-lg bg-teal text-white">Αποδοχή</button>
+                            <button onClick={() => respondMySwap(s.id, "DECLINE")} className="text-xs px-2 py-1 rounded-lg bg-brick text-white">Άρνηση</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
