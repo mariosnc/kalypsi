@@ -114,7 +114,9 @@ export async function GET(req: NextRequest) {
       if (depCompare !== 0) return depCompare;
       const shiftCompare = (a.shiftType || "").localeCompare(b.shiftType || "");
       if (shiftCompare !== 0) return shiftCompare;
-      return rankOrder(a.rank) - rankOrder(b.rank);
+      const rankCompare = rankOrder(a.rank) - rankOrder(b.rank);
+      if (rankCompare !== 0) return rankCompare;
+      return a.email.localeCompare(b.email);
     });
 
   return NextResponse.json({
