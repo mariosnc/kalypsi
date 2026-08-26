@@ -31,13 +31,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     data.shiftGroup = body.shiftGroup;
   }
 
-  if (body.shiftType !== undefined) {
-    if (body.shiftType !== "DAY" && body.shiftType !== "NIGHT" && body.shiftType !== null) {
-      return NextResponse.json({ error: "Μη έγκυρη βάρδια." }, { status: 400 });
-    }
-    data.shiftType = finalDept === "Μονιάτης" ? body.shiftType : null;
-  }
-
   if (body.phone !== undefined) {
     const phoneStr = String(body.phone).trim();
     if (!/^\d{8}$/.test(phoneStr)) {

@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { computeLeaveHours } from "@/lib/date";
+import { groupsForDepartment, defaultStartingGroup, dayNightGroups } from "@/lib/shifts";
 
 function inclusiveDayCount(startISO: string, endISO: string): number {
   const s = new Date(startISO + "T00:00:00Z");
   const e = new Date(endISO + "T00:00:00Z");
   return Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
+}
+
+function todayUTC() {
+  const d = new Date();
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
 export async function GET(req: NextRequest) {
@@ -32,11 +38,26 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(requests);
 }
 
+// Υπολογίζει αυτόματα αν ο υπάλληλος του Μονιάτη κάνει βάρδια Ημέρας ή Νύχτας στη δεδομένη ημερομηνία,
+// με βάση την ομάδα του και τον κύκλο βαρδιών (χωρίς να χρειάζεται να το επιλέξει ο ίδιος).
+async function computeMoniatisShiftType(userShiftGroup: string | null, startDate: string): Promise<"DAY" | "NIGHT" | null> {
+  if (!userShiftGroup) return null;
+  const groups = groupsForDepartment("Μονιάτης");
+  const cycle = await prisma.shiftCycle.findUnique({ where: { department: "Μονιάτης" } });
+  const anchorDate = cycle?.anchorDate || todayUTC();
+  const anchorIdx = cycle?.anchorGroupIndex ?? groups.indexOf(defaultStartingGroup("Μονιάτης"));
+  const day = new Date(startDate + "T00:00:00Z");
+  const { dayGroup, nightGroup } = dayNightGroups(anchorDate, anchorIdx, day, groups);
+  if (userShiftGroup === dayGroup) return "DAY";
+  if (userShiftGroup === nightGroup) return "NIGHT";
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Μη εξουσιοδοτημένος." }, { status: 401 });
 
-  const { startDate, endDate, leaveType, shiftType } = await req.json();
+  const { startDate, endDate, leaveType } = await req.json();
   if (!startDate || !endDate || endDate < startDate) {
     return NextResponse.json({ error: "Μη έγκυρο εύρος ημερομηνιών." }, { status: 400 });
   }
@@ -46,10 +67,7 @@ export async function POST(req: NextRequest) {
 
   let finalShiftType: "DAY" | "NIGHT" | null = null;
   if (user.department === "Μονιάτης") {
-    if (shiftType !== "DAY" && shiftType !== "NIGHT") {
-      return NextResponse.json({ error: "Επίλεξε βάρδια: Ημέρα ή Νύχτα." }, { status: 400 });
-    }
-    finalShiftType = shiftType;
+    finalShiftType = await computeMoniatisShiftType(user.shiftGroup, startDate);
   }
 
   if (user.employeeType === "PERMANENT") {

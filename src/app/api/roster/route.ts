@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { groupsForDepartment, defaultStartingGroup, computeWorkingGroupIndex } from "@/lib/shifts";
+import { groupsForDepartment, defaultStartingGroup, computeWorkingGroupIndex, dayNightGroups } from "@/lib/shifts";
 import { RANKS } from "@/lib/balances";
 
 const DEPARTMENTS = ["Μονιάτης", "Πελένδρι", "Αγρός", "Εφταγώνια", "Πάχνα", "Κυβίδες"];
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const [users, approvedOnDay, cycles, approvedSwaps] = await Promise.all([
     prisma.user.findMany({
       orderBy: { name: "asc" },
-      select: { id: true, name: true, email: true, department: true, shiftGroup: true, shiftType: true, phone: true, qualifications: true, rank: true, role: true },
+      select: { id: true, name: true, email: true, department: true, shiftGroup: true, phone: true, qualifications: true, rank: true, role: true },
     }),
     prisma.leaveRequest.findMany({
       where: { status: "APPROVED", startDate: { lte: day }, endDate: { gte: day } },
@@ -40,13 +40,24 @@ export async function GET(req: NextRequest) {
   const swapCoverIds = new Set(approvedSwaps.map((s) => s.colleagueId));
 
   const workingGroupByDept: Record<string, string> = {};
+  let moniatisDayGroup = "";
+  let moniatisNightGroup = "";
+
   for (const dep of DEPARTMENTS) {
     const groups = groupsForDepartment(dep);
     const cycle = cycles.find((c) => c.department === dep);
     const anchorDate = cycle?.anchorDate || todayUTC();
     const anchorIdx = cycle?.anchorGroupIndex ?? groups.indexOf(defaultStartingGroup(dep));
-    const idx = computeWorkingGroupIndex(anchorDate, anchorIdx, day, groups.length);
-    workingGroupByDept[dep] = groups[idx];
+
+    if (dep === "Μονιάτης") {
+      const { dayGroup, nightGroup } = dayNightGroups(anchorDate, anchorIdx, day, groups);
+      moniatisDayGroup = dayGroup;
+      moniatisNightGroup = nightGroup;
+      workingGroupByDept[dep] = dayGroup;
+    } else {
+      const idx = computeWorkingGroupIndex(anchorDate, anchorIdx, day, groups.length);
+      workingGroupByDept[dep] = groups[idx];
+    }
   }
 
   const rankOrder = (r: string | null) => {
@@ -59,8 +70,24 @@ export async function GET(req: NextRequest) {
     .map((u) => {
       const onLeave = onLeaveIds.has(u.id);
       const dept = u.department || "";
-      const workingGroup = workingGroupByDept[dept];
-      const onShift = !workingGroup || u.shiftGroup === workingGroup;
+
+      let onShift: boolean;
+      let shiftType: "DAY" | "NIGHT" | null = null;
+
+      if (dept === "Μονιάτης") {
+        if (u.shiftGroup === moniatisDayGroup) {
+          onShift = true;
+          shiftType = "DAY";
+        } else if (u.shiftGroup === moniatisNightGroup) {
+          onShift = true;
+          shiftType = "NIGHT";
+        } else {
+          onShift = false;
+        }
+      } else {
+        const workingGroup = workingGroupByDept[dept];
+        onShift = !workingGroup || u.shiftGroup === workingGroup;
+      }
 
       let status: "working" | "off" | "on_leave" = "working";
       if (swapCoverIds.has(u.id)) status = "working";
@@ -74,7 +101,7 @@ export async function GET(req: NextRequest) {
         department: u.department,
         rank: u.rank,
         shiftGroup: u.shiftGroup,
-        shiftType: u.shiftType,
+        shiftType,
         phone: u.phone,
         qualifications: u.qualifications,
         role: u.role,

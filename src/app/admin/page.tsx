@@ -130,7 +130,6 @@ export default function AdminPage() {
   const [newDaysLeave, setNewDaysLeave] = useState("20");
   const [newDaysDayOff, setNewDaysDayOff] = useState("0");
   const [newRole, setNewRole] = useState<"EMPLOYEE" | "ADMIN">("EMPLOYEE");
-  const [newShiftType, setNewShiftType] = useState<"DAY" | "NIGHT">("DAY");
   const [newError, setNewError] = useState("");
   const [newSuccess, setNewSuccess] = useState("");
 
@@ -290,7 +289,6 @@ export default function AdminPage() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: newName, email: newEmail, password: newPassword, department: newDept, shiftGroup: newGroup,
-        shiftType: newDept === "Μονιάτης" ? newShiftType : undefined,
         phone: newPhone, rank: newRank, employeeType: newEmpType, qualifications: newQuals, role: newRole,
         hoursOvertime: newHoursOvertime, hoursHolidays: newHoursHolidays, hoursAnnual: newHoursAnnual, hoursAccumulated: newHoursAccumulated,
         daysLeave: newDaysLeave, daysDayOff: newDaysDayOff,
@@ -330,11 +328,13 @@ export default function AdminPage() {
   const coverageForDate = (iso: string, dept: string) => coverage.find((c) => c.date === iso)?.byDept?.[dept];
 
   const groupedRoster = roster
-    ? roster.roster.reduce((acc: Record<string, RosterRow[]>, r) => {
-        const k = r.department || "Χωρίς τμήμα";
-        (acc[k] = acc[k] || []).push(r);
-        return acc;
-      }, {})
+    ? roster.roster
+        .filter((r) => r.status !== "off") // μόνο η βάρδια που εργάζεται σήμερα, όχι όλο το προσωπικό
+        .reduce((acc: Record<string, RosterRow[]>, r) => {
+          const k = r.department || "Χωρίς τμήμα";
+          (acc[k] = acc[k] || []).push(r);
+          return acc;
+        }, {})
     : {};
 
   const pendingSwaps = swaps.filter((s) => s.status === "COLLEAGUE_ACCEPTED");
@@ -481,11 +481,13 @@ export default function AdminPage() {
               onClick={() => {
                 if (!roster) return;
                 downloadCSV(`katastasi-${rosterDate}.csv`, [
-                  ["Τμήμα", "Βάρδια", "Όνομα χρήστη", "Ονοματεπώνυμο", "Προσόντα", "Τηλέφωνο", "Κατάσταση"],
-                  ...roster.roster.map((e) => [
-                    e.department || "", e.shiftType === "DAY" ? "Ημέρα" : e.shiftType === "NIGHT" ? "Νύχτα" : "",
-                    e.email, e.name, e.qualifications.join(" / "), e.phone || "", rosterStatusLabel[e.status].label,
-                  ]),
+                  ["Τμήμα", "Βάρδια", "Βαθμός & Όνομα", "Προσόντα", "Τηλέφωνο", "Κατάσταση"],
+                  ...roster.roster
+                    .filter((e) => e.status !== "off")
+                    .map((e) => [
+                      e.department || "", e.shiftType === "DAY" ? "Ημέρα" : e.shiftType === "NIGHT" ? "Νύχτα" : "",
+                      `${e.rank || ""} ${e.name}`.trim(), e.qualifications.join(" / "), e.phone || "", rosterStatusLabel[e.status].label,
+                    ]),
                 ]);
               }}
               className="no-print flex items-center gap-2 text-sm border border-ink/15 text-ink/70 px-4 py-2 rounded-lg"
@@ -504,32 +506,62 @@ export default function AdminPage() {
                 {Object.entries(groupedRoster).map(([dept, rows]) => (
                   <div key={dept} className="mb-5">
                     <div className="font-disp text-base mb-2 text-ink/80">{dept}</div>
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-ink/40 border-b border-ink/10">
-                          {dept === "Μονιάτης" && <th className="py-2 font-normal">Βάρδια</th>}
-                          <th className="py-2 font-normal">Όνομα χρήστη</th>
-                          <th className="py-2 font-normal">Ονοματεπώνυμο</th>
-                          <th className="py-2 font-normal">Προσόντα</th>
-                          <th className="py-2 font-normal">Τηλέφωνο</th>
-                          <th className="py-2 font-normal text-right">Κατάσταση</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((e) => (
-                          <tr key={e.id} className="border-b border-ink/5">
-                            {dept === "Μονιάτης" && (
-                              <td className="py-2 text-ink/50 text-xs">{e.shiftType === "DAY" ? "Ημέρα" : e.shiftType === "NIGHT" ? "Νύχτα" : ""}</td>
-                            )}
-                            <td className="py-2 font-mono text-xs">{e.email}</td>
-                            <td className="py-2">{e.name}</td>
-                            <td className="py-2 text-ink/50 text-xs">{e.qualifications.join(", ")}</td>
-                            <td className="py-2 text-ink/50 font-mono text-xs">{e.phone}</td>
-                            <td className={`py-2 text-right font-medium ${rosterStatusLabel[e.status].color}`}>{rosterStatusLabel[e.status].label}</td>
-                          </tr>
+                    {dept === "Μονιάτης" ? (
+                      <>
+                        {[
+                          { label: "Βάρδια Ημέρας", filter: (r: RosterRow) => r.shiftType === "DAY" },
+                          { label: "Βάρδια Νύχτας", filter: (r: RosterRow) => r.shiftType === "NIGHT" },
+                        ].map(({ label, filter }) => (
+                          <div key={label} className="mb-4">
+                            <div className="text-sm text-ink/60 mb-1">{label}</div>
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-left text-ink/40 border-b border-ink/10">
+                                  <th className="py-2 font-normal">Βαθμός & Όνομα</th>
+                                  <th className="py-2 font-normal">Προσόντα</th>
+                                  <th className="py-2 font-normal">Τηλέφωνο</th>
+                                  <th className="py-2 font-normal text-right">Κατάσταση</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.filter(filter).map((e) => (
+                                  <tr key={e.id} className="border-b border-ink/5">
+                                    <td className="py-2">{e.rank} {e.name}</td>
+                                    <td className="py-2 text-ink/50 text-xs">{e.qualifications.join(", ")}</td>
+                                    <td className="py-2 text-ink/50 font-mono text-xs">{e.phone}</td>
+                                    <td className={`py-2 text-right font-medium ${rosterStatusLabel[e.status].color}`}>{rosterStatusLabel[e.status].label}</td>
+                                  </tr>
+                                ))}
+                                {rows.filter(filter).length === 0 && (
+                                  <tr><td colSpan={4} className="py-2 text-ink/40 text-xs">Κανείς</td></tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
+                      </>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-ink/40 border-b border-ink/10">
+                            <th className="py-2 font-normal">Βαθμός & Όνομα</th>
+                            <th className="py-2 font-normal">Προσόντα</th>
+                            <th className="py-2 font-normal">Τηλέφωνο</th>
+                            <th className="py-2 font-normal text-right">Κατάσταση</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((e) => (
+                            <tr key={e.id} className="border-b border-ink/5">
+                              <td className="py-2">{e.rank} {e.name}</td>
+                              <td className="py-2 text-ink/50 text-xs">{e.qualifications.join(", ")}</td>
+                              <td className="py-2 text-ink/50 font-mono text-xs">{e.phone}</td>
+                              <td className={`py-2 text-right font-medium ${rosterStatusLabel[e.status].color}`}>{rosterStatusLabel[e.status].label}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
                   </div>
                 ))}
               </>
@@ -742,16 +774,10 @@ export default function AdminPage() {
                             <option value="PERMANENT">Μόνιμος</option>
                           </select>
                         </label>
-                        {(edits.department ?? e.department) === "Μονιάτης" && (
-                          <label className="text-sm">
-                            <div className="text-ink/50 mb-1">Βάρδια (24ωρο)</div>
-                            <select defaultValue={e.shiftType || "DAY"} onChange={(ev) => updateEdit(e.id, "shiftType", ev.target.value)} className="w-full border border-ink/15 rounded-lg px-2 py-1.5 bg-white">
-                              <option value="DAY">Ημέρα</option>
-                              <option value="NIGHT">Νύχτα</option>
-                            </select>
-                          </label>
-                        )}
                       </div>
+                      {(edits.department ?? e.department) === "Μονιάτης" && (
+                        <div className="text-xs text-ink/40">Η βάρδια (Ημέρα/Νύχτα) υπολογίζεται αυτόματα κάθε μέρα από την ομάδα βάρδιας — δεν χρειάζεται χειροκίνητη ρύθμιση.</div>
+                      )}
                       <div>
                         <div className="text-sm text-ink/50 mb-1">Προσόντα</div>
                         <div className="flex flex-wrap gap-2">
@@ -978,13 +1004,7 @@ export default function AdminPage() {
             </label>
           )}
           {newDept === "Μονιάτης" && (
-            <label className="block text-sm">
-              <div className="text-ink/50 mb-1">Βάρδια (24ωρο)</div>
-              <select value={newShiftType} onChange={(e) => setNewShiftType(e.target.value as "DAY" | "NIGHT")} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
-                <option value="DAY">Ημέρα</option>
-                <option value="NIGHT">Νύχτα</option>
-              </select>
-            </label>
+            <div className="text-xs text-ink/40">Η βάρδια (Ημέρα/Νύχτα) υπολογίζεται αυτόματα κάθε μέρα από την ομάδα βάρδιας — δεν χρειάζεται χειροκίνητη ρύθμιση.</div>
           )}
           <div>
             <div className="text-sm text-ink/50 mb-1">Προσόντα</div>

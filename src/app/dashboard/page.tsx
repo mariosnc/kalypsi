@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { PlusCircle, Send, LogOut, AlertTriangle, KeyRound, Repeat } from "lucide-react";
 
 type Me = {
-  id: string; name: string; role: string; department: string | null; employeeType: "PERMANENT" | "TWP";
+  id: string; name: string; role: string; department: string | null; shiftGroup: string | null; employeeType: "PERMANENT" | "TWP";
   hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
   daysLeave: number; daysDayOff: number;
 };
@@ -44,7 +44,7 @@ export default function Dashboard() {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [leaveType, setLeaveType] = useState<"LEAVE" | "DAYOFF">("LEAVE");
-  const [shiftType, setShiftType] = useState<"DAY" | "NIGHT">("DAY");
+  const [autoShiftType, setAutoShiftType] = useState<"DAY" | "NIGHT" | null>(null);
   const [error, setError] = useState("");
   const [coverageWarning, setCoverageWarning] = useState("");
 
@@ -81,6 +81,7 @@ export default function Dashboard() {
   useEffect(() => {
     async function check() {
       setCoverageWarning("");
+      setAutoShiftType(null);
       if (!me?.department || !start || !end || end < start) return;
 
       const months = new Set<string>();
@@ -94,13 +95,27 @@ export default function Dashboard() {
         if (res.ok) days = days.concat((await res.json()).days);
       }
 
+      // για το Μονιάτης, βρες αυτόματα αν η αίτηση αφορά βάρδια Ημέρας ή Νύχτας εκείνη τη μέρα
+      let key = me.department;
+      if (me.department === "Μονιάτης") {
+        const cycleRes = await fetch(`/api/shift-cycle?date=${start}`);
+        if (cycleRes.ok) {
+          const cycles = await cycleRes.json();
+          const moniatis = cycles.find((c: any) => c.department === "Μονιάτης");
+          if (moniatis) {
+            const detected = moniatis.workingGroup === me.shiftGroup ? "DAY" : "NIGHT";
+            setAutoShiftType(detected);
+            key = `Μονιάτης (${detected === "NIGHT" ? "Νύχτα" : "Ημέρα"})`;
+          }
+        }
+      }
+
       const conflictDays: string[] = [];
       const cur = new Date(start + "T00:00:00Z");
       const endD = new Date(end + "T00:00:00Z");
-      const key = me.department === "Μονιάτης" ? `Μονιάτης (${shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : me.department!;
       while (cur <= endD) {
         const iso = cur.toISOString().slice(0, 10);
-        const avail = days.find((d) => d.date === iso)?.byDept?.[key];
+        const avail = days.find((d) => d.date === iso)?.byDept?.[key!];
         if (avail !== undefined && avail - 1 < 0) conflictDays.push(fmt(iso));
         cur.setUTCDate(cur.getUTCDate() + 1);
       }
@@ -112,14 +127,13 @@ export default function Dashboard() {
       }
     }
     check();
-  }, [start, end, me, shiftType]);
+  }, [start, end, me]);
 
   async function submitRequest(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     const body: any = { startDate: start, endDate: end };
     if (me?.employeeType === "PERMANENT") body.leaveType = leaveType;
-    if (me?.department === "Μονιάτης") body.shiftType = shiftType;
     const res = await fetch("/api/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -282,10 +296,9 @@ export default function Dashboard() {
               <button type="button" onClick={() => setLeaveType("DAYOFF")} className={`text-sm px-3 py-1.5 rounded-full ${leaveType === "DAYOFF" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Ημεραργία</button>
             </div>
           )}
-          {isMoniatis && (
-            <div className="flex gap-2 mb-3">
-              <button type="button" onClick={() => setShiftType("DAY")} className={`text-sm px-3 py-1.5 rounded-full ${shiftType === "DAY" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Βάρδια Ημέρας</button>
-              <button type="button" onClick={() => setShiftType("NIGHT")} className={`text-sm px-3 py-1.5 rounded-full ${shiftType === "NIGHT" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Βάρδια Νύχτας</button>
+          {isMoniatis && autoShiftType && (
+            <div className="mb-3 text-sm text-ink/60 bg-ink/5 rounded-lg px-3 py-2 inline-block">
+              Ανιχνεύτηκε αυτόματα: <span className="font-medium text-ink">{autoShiftType === "NIGHT" ? "Βάρδια Νύχτας" : "Βάρδια Ημέρας"}</span> (με βάση την ομάδα σου)
             </div>
           )}
           <div className="flex flex-wrap gap-3 items-end">
