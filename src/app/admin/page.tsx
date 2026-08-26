@@ -586,9 +586,9 @@ export default function AdminPage() {
                   ["Τμήμα", "Βάρδια", "Βαθμός & Όνομα", "Προσόντα", "Τηλέφωνο", "Κατάσταση"],
                   ...roster.roster
                     .filter((e) => e.status !== "off")
-                    .map((e, i) => [
+                    .map((e) => [
                       e.department || "", e.shiftType === "DAY" ? "Ημέρα" : e.shiftType === "NIGHT" ? "Νύχτα" : "",
-                      `${e.rank || ""} ${i + 1} ${e.name}`.trim(), e.qualifications.join(" / "), e.phone || "", rosterStatusLabel[e.status].label,
+                      `${e.rank || ""} ${e.email} ${e.name}`.trim(), e.qualifications.join(" / "), e.phone || "", rosterStatusLabel[e.status].label,
                     ]),
                 ]);
               }}
@@ -626,9 +626,9 @@ export default function AdminPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {rows.filter(filter).map((e, i) => (
+                                {rows.filter(filter).map((e) => (
                                   <tr key={e.id} className="border-b border-ink/5">
-                                    <td className="py-2">{e.rank} {i + 1} {e.name}</td>
+                                    <td className="py-2">{e.rank} {e.email} {e.name}</td>
                                     <td className="py-2 text-ink/50 text-xs">{e.qualifications.join(", ")}</td>
                                     <td className="py-2 text-ink/50 font-mono text-xs">{e.phone}</td>
                                     <td className={`py-2 text-right font-medium ${rosterStatusLabel[e.status].color}`}>{rosterStatusLabel[e.status].label}</td>
@@ -653,9 +653,9 @@ export default function AdminPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {rows.map((e, i) => (
+                          {rows.map((e) => (
                             <tr key={e.id} className="border-b border-ink/5">
-                              <td className="py-2">{e.rank} {i + 1} {e.name}</td>
+                              <td className="py-2">{e.rank} {e.email} {e.name}</td>
                               <td className="py-2 text-ink/50 text-xs">{e.qualifications.join(", ")}</td>
                               <td className="py-2 text-ink/50 font-mono text-xs">{e.phone}</td>
                               <td className={`py-2 text-right font-medium ${rosterStatusLabel[e.status].color}`}>{rosterStatusLabel[e.status].label}</td>
