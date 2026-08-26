@@ -17,7 +17,7 @@ type RosterRow = {
   role?: string; status: "working" | "off" | "on_leave";
 };
 type CoverageDay = { date: string; byDept: Record<string, number> };
-type StaffingRuleRow = { id: string; department: string; totalForce: number };
+type StaffingRuleRow = { id: string; department: string; shiftType: string; totalForce: number };
 type EmployeeRow = {
   id: string; name: string; email: string; department: string | null; shiftGroup: string | null; shiftType: "DAY" | "NIGHT" | null;
   phone: string | null; qualifications: string[]; employeeType: "PERMANENT" | "TWP"; rank: string | null; role?: string;
@@ -32,6 +32,8 @@ const DEPARTMENTS = ["Μονιάτης", "Πελένδρι", "Αγρός", "Εφ
 const QUALIFICATIONS = ["ΟΔ/ΑΣ", "ΟΔ", "ΑΣ", "οδ/ΑΣ", "οδ"];
 const RANKS = ["Πυρ/μος", "Α/Π", "Δ/Πυρ.", "Ε/Π"];
 const groupsForDepartment = (dept: string) => (dept === "Μονιάτης" ? ["Πράσινη", "Ερυθρά", "Κυανή", "Λευκή"] : ["Α", "Β"]);
+const effectiveKey = (dept: string, shiftType?: string | null) =>
+  dept === "Μονιάτης" ? `Μονιάτης (${shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : dept;
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -193,11 +195,11 @@ export default function AdminPage() {
     loadPending(); loadCoverage();
   }
 
-  async function updateTotalForce(department: string, v: number) {
-    setRules((rs) => rs.map((r) => (r.department === department ? { ...r, totalForce: v } : r)));
+  async function updateTotalForce(department: string, shiftType: string, v: number) {
+    setRules((rs) => rs.map((r) => (r.department === department && r.shiftType === shiftType ? { ...r, totalForce: v } : r)));
     await fetch("/api/staffing-rule", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ department, totalForce: v }),
+      body: JSON.stringify({ department, shiftType, totalForce: v }),
     });
     loadCoverage();
   }
@@ -393,9 +395,9 @@ export default function AdminPage() {
             <div className="flex items-center gap-2 text-sm text-ink/50 mb-2"><Users size={15} /> Δύναμη ανά τμήμα</div>
             <div className="flex flex-wrap gap-3">
               {rules.map((r) => (
-                <label key={r.department} className="flex items-center gap-2 text-sm">
-                  <span className="text-ink/70">{r.department}</span>
-                  <input type="number" min={0} value={r.totalForce} onChange={(e) => updateTotalForce(r.department, Number(e.target.value))}
+                <label key={`${r.department}-${r.shiftType}`} className="flex items-center gap-2 text-sm">
+                  <span className="text-ink/70">{r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department}</span>
+                  <input type="number" min={0} value={r.totalForce} onChange={(e) => updateTotalForce(r.department, r.shiftType, Number(e.target.value))}
                     className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono" />
                 </label>
               ))}
@@ -409,12 +411,13 @@ export default function AdminPage() {
 
           {pending.map((r) => {
             const dept = r.user.department || "Χωρίς τμήμα";
+            const covKey = effectiveKey(dept, r.shiftType);
             const shortage: string[] = [];
             let cur = new Date(r.startDate);
             const endD = new Date(r.endDate);
             while (cur <= endD) {
               const iso = cur.toISOString().slice(0, 10);
-              const avail = coverageForDate(iso, dept);
+              const avail = coverageForDate(iso, covKey);
               if (avail !== undefined && avail - 1 < 0) shortage.push(fmt(iso));
               cur.setUTCDate(cur.getUTCDate() + 1);
             }

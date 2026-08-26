@@ -97,9 +97,10 @@ export default function Dashboard() {
       const conflictDays: string[] = [];
       const cur = new Date(start + "T00:00:00Z");
       const endD = new Date(end + "T00:00:00Z");
+      const key = me.department === "Μονιάτης" ? `Μονιάτης (${shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : me.department!;
       while (cur <= endD) {
         const iso = cur.toISOString().slice(0, 10);
-        const avail = days.find((d) => d.date === iso)?.byDept?.[me.department!];
+        const avail = days.find((d) => d.date === iso)?.byDept?.[key];
         if (avail !== undefined && avail - 1 < 0) conflictDays.push(fmt(iso));
         cur.setUTCDate(cur.getUTCDate() + 1);
       }
@@ -111,7 +112,7 @@ export default function Dashboard() {
       }
     }
     check();
-  }, [start, end, me]);
+  }, [start, end, me, shiftType]);
 
   async function submitRequest(e: React.FormEvent) {
     e.preventDefault();

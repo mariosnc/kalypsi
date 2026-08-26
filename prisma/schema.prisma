@@ -117,8 +117,11 @@ model BalanceAdjustment {
 // Δύναμη (συνολικός αριθμός υπαλλήλων) ανά τμήμα
 model StaffingRule {
   id         String @id @default(cuid())
-  department String @unique
+  department String
+  shiftType  String @default("") // "" για κανονικά τμήματα· "DAY"/"NIGHT" μόνο για Μονιάτης
   totalForce Int    @default(0)
+
+  @@unique([department, shiftType])
 }
 
 // Άδειες ιατρού / εκπαίδευση: αφαιρούν άτομα από τη Δύναμη μόνο για συγκεκριμένη περίοδο
