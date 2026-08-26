@@ -15,6 +15,7 @@ enum Role {
 
 enum RequestStatus {
   PENDING
+  PENDING_FINAL // αρχικά εγκεκριμένη από διαχειριστή, αναμένει τελική έγκριση
   APPROVED
   REJECTED
 }
@@ -37,6 +38,7 @@ enum SwapStatus {
   PENDING
   COLLEAGUE_DECLINED
   COLLEAGUE_ACCEPTED
+  PENDING_FINAL // αρχικά εγκεκριμένη από διαχειριστή, αναμένει τελική έγκριση
   ADMIN_REJECTED
   APPROVED
 }
@@ -57,6 +59,8 @@ model User {
   passwordHash   String
   name           String
   role           Role         @default(EMPLOYEE)
+  staffMember    Boolean      @default(true) // false = διαχειριστής χωρίς φυσική παρουσία στο προσωπικό (δεν εμφανίζεται σε καταστάσεις/βάρδιες)
+  finalApprover  Boolean      @default(false) // true = διαχειριστής τελικής έγκρισης
   department     String?
   shiftGroup     String?
   phone          String?

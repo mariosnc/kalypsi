@@ -70,7 +70,8 @@ const rosterStatusLabel: Record<string, { label: string; color: string }> = {
 
 const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
   PENDING: { label: "Αναμονή συναδέλφου", bg: "#C97A2E1A", fg: "#C97A2E" },
-  COLLEAGUE_ACCEPTED: { label: "Προς έγκριση", bg: "#C97A2E1A", fg: "#C97A2E" },
+  COLLEAGUE_ACCEPTED: { label: "Προς αρχική έγκριση", bg: "#C97A2E1A", fg: "#C97A2E" },
+  PENDING_FINAL: { label: "Προς τελική έγκριση", bg: "#C97A2E1A", fg: "#C97A2E" },
   COLLEAGUE_DECLINED: { label: "Απορρίφθηκε (συνάδελφος)", bg: "#A8453A1A", fg: "#A8453A" },
   ADMIN_REJECTED: { label: "Απορρίφθηκε", bg: "#A8453A1A", fg: "#A8453A" },
   APPROVED: { label: "Εγκρίθηκε", bg: "#2F6F5E1A", fg: "#2F6F5E" },
@@ -78,8 +79,11 @@ const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "roster" | "general" | "weekly" | "employees" | "absences" | "shifts" | "swaps" | "new">("pending");
+  const [tab, setTab] = useState<"pending" | "final" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "swaps" | "new">("pending");
+  const [me, setMe] = useState<{ id: string; name: string; finalApprover: boolean } | null>(null);
   const [pending, setPending] = useState<PendingReq[]>([]);
+  const [finalPending, setFinalPending] = useState<PendingReq[]>([]);
+  const [adminsList, setAdminsList] = useState<{ id: string; name: string; email: string; staffMember: boolean; finalApprover: boolean }[]>([]);
   const [rules, setRules] = useState<StaffingRuleRow[]>([]);
   const [coverage, setCoverage] = useState<CoverageDay[]>([]);
   const [rosterDate, setRosterDate] = useState(todayISO());
@@ -130,6 +134,8 @@ export default function AdminPage() {
   const [newDaysLeave, setNewDaysLeave] = useState("20");
   const [newDaysDayOff, setNewDaysDayOff] = useState("0");
   const [newRole, setNewRole] = useState<"EMPLOYEE" | "ADMIN">("EMPLOYEE");
+  const [newStaffMember, setNewStaffMember] = useState(true);
+  const [newFinalApprover, setNewFinalApprover] = useState(false);
   const [newError, setNewError] = useState("");
   const [newSuccess, setNewSuccess] = useState("");
 
@@ -139,6 +145,18 @@ export default function AdminPage() {
   const loadPending = useCallback(async () => {
     const res = await fetch("/api/requests?status=PENDING");
     if (res.ok) setPending(await res.json());
+  }, []);
+  const loadFinalPending = useCallback(async () => {
+    const res = await fetch("/api/requests?status=PENDING_FINAL");
+    if (res.ok) setFinalPending(await res.json());
+  }, []);
+  const loadMe = useCallback(async () => {
+    const res = await fetch("/api/me");
+    if (res.ok) setMe(await res.json());
+  }, []);
+  const loadAdmins = useCallback(async () => {
+    const res = await fetch("/api/admins");
+    if (res.ok) setAdminsList(await res.json());
   }, []);
   const loadRules = useCallback(async () => {
     const res = await fetch("/api/staffing-rule");
@@ -174,14 +192,16 @@ export default function AdminPage() {
     if (res.ok) setWeeklyRequests(await res.json());
   }, []);
 
-  useEffect(() => { loadPending(); loadRules(); loadCoverage(); }, [loadPending, loadRules, loadCoverage]);
+  useEffect(() => { loadPending(); loadRules(); loadCoverage(); loadMe(); }, [loadPending, loadRules, loadCoverage, loadMe]);
   useEffect(() => { if (tab === "roster") loadRoster(rosterDate); }, [tab, rosterDate, loadRoster]);
   useEffect(() => { if (tab === "employees") loadEmployees(); }, [tab, loadEmployees]);
   useEffect(() => { if (tab === "absences") loadAbsences(); }, [tab, loadAbsences]);
   useEffect(() => { if (tab === "shifts") loadShiftCycles(); }, [tab, loadShiftCycles]);
   useEffect(() => { if (tab === "swaps") loadSwaps(); }, [tab, loadSwaps]);
+  useEffect(() => { if (tab === "final") { loadFinalPending(); loadSwaps(); } }, [tab, loadFinalPending, loadSwaps]);
   useEffect(() => { if (tab === "general") loadEmployees(); }, [tab, loadEmployees]);
   useEffect(() => { if (tab === "weekly") loadWeekly(); }, [tab, loadWeekly]);
+  useEffect(() => { if (tab === "admins") loadAdmins(); }, [tab, loadAdmins]);
   useEffect(() => { setNewGroup(groupsForDepartment(newDept)[0] || ""); }, [newDept]);
   useEffect(() => { setFixGroup(groupsForDepartment(fixDept)[0] || ""); }, [fixDept]);
 
@@ -191,7 +211,7 @@ export default function AdminPage() {
       body: JSON.stringify({ decision, reason }),
     });
     setRejectingId(null); setRejectReason("");
-    loadPending(); loadCoverage();
+    loadPending(); loadFinalPending(); loadCoverage();
   }
 
   async function updateTotalForce(department: string, shiftType: string, v: number) {
@@ -292,6 +312,8 @@ export default function AdminPage() {
         phone: newPhone, rank: newRank, employeeType: newEmpType, qualifications: newQuals, role: newRole,
         hoursOvertime: newHoursOvertime, hoursHolidays: newHoursHolidays, hoursAnnual: newHoursAnnual, hoursAccumulated: newHoursAccumulated,
         daysLeave: newDaysLeave, daysDayOff: newDaysDayOff,
+        staffMember: newRole === "ADMIN" ? newStaffMember : true,
+        finalApprover: newRole === "ADMIN" ? newFinalApprover : false,
       }),
     });
     if (!res.ok) {
@@ -301,8 +323,16 @@ export default function AdminPage() {
     }
     setNewSuccess(`Ο/Η ${newName} προστέθηκε. Όνομα χρήστη: ${newEmail} — κωδικός: ${newPassword}`);
     setNewName(""); setNewEmail(""); setNewPassword(""); setNewDept(""); setNewPhone(""); setNewRank("");
-    setNewQuals([]); setNewEmpType("TWP"); setNewRole("EMPLOYEE");
+    setNewQuals([]); setNewEmpType("TWP"); setNewRole("EMPLOYEE"); setNewStaffMember(true); setNewFinalApprover(false);
     loadRules();
+  }
+
+  async function updateAdminFlag(id: string, field: "staffMember" | "finalApprover", value: boolean) {
+    setAdminsList((as) => as.map((a) => (a.id === id ? { ...a, [field]: value } : a)));
+    await fetch(`/api/users/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
   }
 
   async function changePassword(e: React.FormEvent) {
@@ -373,6 +403,9 @@ export default function AdminPage() {
       <div className="no-print flex gap-2 flex-wrap">
         {[
           ["pending", `Εκκρεμείς (${pending.length})`],
+          ...(me?.finalApprover
+            ? [["final", `Τελική έγκριση (${finalPending.length + swaps.filter((s) => s.status === "PENDING_FINAL").length})`]]
+            : []),
           ["roster", "Ημερήσια κατάσταση"],
           ["general", "Γενική κατάσταση"],
           ["weekly", "Εβδομαδιαία αναφορά"],
@@ -380,6 +413,7 @@ export default function AdminPage() {
           ["swaps", `Ανταλλαγές${pendingSwaps.length ? ` (${pendingSwaps.length})` : ""}`],
           ["absences", "Ιατρού / Εκπαίδευση"],
           ["shifts", "Βάρδιες"],
+          ...(me?.finalApprover ? [["admins", "Διαχειριστές"]] : []),
           ["new", "Νέος υπάλληλος"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key as any)}
@@ -444,7 +478,7 @@ export default function AdminPage() {
                     </button>
                     <button onClick={() => decide(r.id, "APPROVED")}
                       className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-teal text-white hover:opacity-90">
-                      <CheckCircle2 size={15} /> Έγκριση
+                      <CheckCircle2 size={15} /> {me?.finalApprover ? "Έγκριση" : "Αρχική έγκριση"}
                     </button>
                   </div>
                 </div>
@@ -464,6 +498,74 @@ export default function AdminPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {tab === "final" && (
+        <div className="space-y-3">
+          <div className="text-sm text-ink/50 bg-white rounded-xl border border-ink/10 p-3">
+            Εδώ φτάνουν οι αιτήσεις και τα αιτήματα που έχουν ήδη λάβει αρχική έγκριση από άλλον διαχειριστή και περιμένουν τη δική σου οριστική έγκριση.
+          </div>
+
+          <div className="font-disp text-lg">Αιτήσεις άδειας</div>
+          {finalPending.length === 0 && (
+            <div className="text-sm text-ink/40 bg-white rounded-xl border border-ink/10 p-6 text-center">Καμία αίτηση προς τελική έγκριση.</div>
+          )}
+          {finalPending.map((r) => {
+            const isPermanent = r.user.employeeType === "PERMANENT";
+            return (
+              <div key={r.id} className="bg-white rounded-xl border border-ink/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium">{r.user.name} <span className="text-xs font-normal text-ink/40">· {r.user.department}</span></div>
+                    <div className="text-sm text-ink/50">
+                      {fmt(r.startDate)} – {fmt(r.endDate)}
+                      {isPermanent ? (
+                        <> · <span className="font-mono">{r.days} ημέρες</span> · {r.leaveType === "DAYOFF" ? "Ημεραργία" : "Άδεια"}</>
+                      ) : (
+                        <> · <span className="font-mono">{r.hours} ώρες</span></>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setRejectingId(rejectingId === r.id ? null : r.id)}
+                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-brick/30 text-brick hover:bg-brick/5">
+                      <XCircle size={15} /> Απόρριψη
+                    </button>
+                    <button onClick={() => decide(r.id, "APPROVED")}
+                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-teal text-white hover:opacity-90">
+                      <CheckCircle2 size={15} /> Οριστική έγκριση
+                    </button>
+                  </div>
+                </div>
+                {rejectingId === r.id && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <input value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Αιτιολόγηση απόρριψης (προαιρετικό)"
+                      className="flex-1 min-w-[200px] border border-ink/15 rounded-lg px-3 py-2 text-sm" />
+                    <button onClick={() => decide(r.id, "REJECTED", rejectReason)} className="text-sm px-3 py-2 rounded-lg bg-brick text-white">Επιβεβαίωση απόρριψης</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div className="font-disp text-lg pt-3">Ανταλλαγές βάρδιας</div>
+          {swaps.filter((s) => s.status === "PENDING_FINAL").length === 0 && (
+            <div className="text-sm text-ink/40 bg-white rounded-xl border border-ink/10 p-6 text-center">Καμία ανταλλαγή προς τελική έγκριση.</div>
+          )}
+          {swaps.filter((s) => s.status === "PENDING_FINAL").map((s) => (
+            <div key={s.id} className="bg-white rounded-xl border border-ink/10 p-4 flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2 text-sm">
+                <Repeat size={15} className="text-ink/40" />
+                <span className="font-medium">{fmt(s.date)}</span>
+                <span className="text-ink/50">{s.requester.name} ↔ {s.colleague.name}</span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => decideSwap(s.id, "ADMIN_REJECTED")} className="text-xs px-2 py-1 rounded-lg border border-brick/30 text-brick">Απόρριψη</button>
+                <button onClick={() => decideSwap(s.id, "APPROVED")} className="text-xs px-2 py-1 rounded-lg bg-teal text-white">Οριστική έγκριση</button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -846,10 +948,12 @@ export default function AdminPage() {
                 <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ background: swapBadge[s.status].bg, color: swapBadge[s.status].fg }}>
                   {swapBadge[s.status].label}
                 </span>
-                {s.status === "COLLEAGUE_ACCEPTED" && (
+                {(s.status === "COLLEAGUE_ACCEPTED" || (me?.finalApprover && s.status === "PENDING_FINAL")) && (
                   <>
                     <button onClick={() => decideSwap(s.id, "ADMIN_REJECTED")} className="text-xs px-2 py-1 rounded-lg border border-brick/30 text-brick">Απόρριψη</button>
-                    <button onClick={() => decideSwap(s.id, "APPROVED")} className="text-xs px-2 py-1 rounded-lg bg-teal text-white">Έγκριση</button>
+                    <button onClick={() => decideSwap(s.id, "APPROVED")} className="text-xs px-2 py-1 rounded-lg bg-teal text-white">
+                      {me?.finalApprover ? "Έγκριση" : "Αρχική έγκριση"}
+                    </button>
                   </>
                 )}
               </div>
@@ -948,6 +1052,37 @@ export default function AdminPage() {
         </div>
       )}
 
+      {tab === "admins" && (
+        <div className="space-y-3">
+          <div className="text-sm text-ink/50 bg-white rounded-xl border border-ink/10 p-3">
+            Εδώ βλέπεις όλους τους διαχειριστές — ακόμα κι αυτούς που δεν είναι μέλη προσωπικού και δεν εμφανίζονται στη λίστα «Υπάλληλοι».
+          </div>
+          <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+            {adminsList.map((a) => (
+              <div key={a.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">{a.name}</div>
+                  <div className="text-xs text-ink/40">{a.email}</div>
+                </div>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={a.staffMember} onChange={(e) => updateAdminFlag(a.id, "staffMember", e.target.checked)} />
+                    Μέλος προσωπικού
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={a.finalApprover} onChange={(e) => updateAdminFlag(a.id, "finalApprover", e.target.checked)} />
+                    Τελική έγκριση
+                  </label>
+                  <button onClick={() => resetPassword(a.id)} className="text-sm px-3 py-1.5 rounded-lg border border-ink/15 text-ink/70">Επαναφορά κωδικού</button>
+                </div>
+                {resetMsg[a.id] && <div className="text-xs text-teal w-full">{resetMsg[a.id]}</div>}
+              </div>
+            ))}
+            {adminsList.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
+          </div>
+        </div>
+      )}
+
       {tab === "new" && (
         <form onSubmit={createEmployee} className="bg-white rounded-xl border border-ink/10 p-5 max-w-md space-y-4">
           <div className="font-disp text-lg flex items-center gap-2"><UserPlus size={20} /> Νέος υπάλληλος</div>
@@ -964,90 +1099,108 @@ export default function AdminPage() {
             <input required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="τουλάχιστον 6 χαρακτήρες" />
           </label>
           <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Τηλέφωνο (8 ψηφία)</div>
-            <input required pattern="\d{8}" maxLength={8} value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ""))} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="99123456" />
-          </label>
-          <label className="block text-sm">
             <div className="text-ink/50 mb-1">Ρόλος</div>
             <select value={newRole} onChange={(e) => setNewRole(e.target.value as "EMPLOYEE" | "ADMIN")} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
               <option value="EMPLOYEE">Υπάλληλος</option>
               <option value="ADMIN">Διαχειριστής</option>
             </select>
           </label>
-          <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Κατηγορία προσωπικού</div>
-            <select value={newEmpType} onChange={(e) => setNewEmpType(e.target.value as "PERMANENT" | "TWP")} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
-              <option value="TWP">Τ.Ω.Π.</option>
-              <option value="PERMANENT">Μόνιμος</option>
-            </select>
-          </label>
-          <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Βαθμός</div>
-            <select required value={newRank} onChange={(e) => setNewRank(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
-              <option value="" disabled>Επίλεξε βαθμό</option>
-              {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <div className="text-ink/50 mb-1">Τμήμα</div>
-            <select required value={newDept} onChange={(e) => setNewDept(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
-              <option value="" disabled>Επίλεξε τμήμα</option>
-              {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </label>
-          {newDept && (
-            <label className="block text-sm">
-              <div className="text-ink/50 mb-1">Ομάδα βάρδιας</div>
-              <select value={newGroup} onChange={(e) => setNewGroup(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
-                {groupsForDepartment(newDept).map((g) => <option key={g} value={g}>{g}</option>)}
-              </select>
-            </label>
-          )}
-          {newDept === "Μονιάτης" && (
-            <div className="text-xs text-ink/40">Η βάρδια (Ημέρα/Νύχτα) υπολογίζεται αυτόματα κάθε μέρα από την ομάδα βάρδιας — δεν χρειάζεται χειροκίνητη ρύθμιση.</div>
-          )}
-          <div>
-            <div className="text-sm text-ink/50 mb-1">Προσόντα</div>
-            <div className="flex flex-wrap gap-2">
-              {QUALIFICATIONS.map((q) => (
-                <button key={q} type="button" onClick={() => toggleNewQual(q)}
-                  className={`text-xs px-2.5 py-1 rounded-full border ${newQuals.includes(q) ? "bg-ink text-white border-ink" : "border-ink/20 text-ink/60"}`}>
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
 
-          {newEmpType === "PERMANENT" ? (
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-sm">
-                <div className="text-ink/50 mb-1">Άδεια (ημέρες)</div>
-                <input type="number" value={newDaysLeave} onChange={(e) => setNewDaysLeave(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+          {newRole === "ADMIN" && (
+            <div className="space-y-2 bg-ink/5 rounded-lg p-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={newStaffMember} onChange={(e) => setNewStaffMember(e.target.checked)} />
+                Μέλος προσωπικού (εμφανίζεται σε καταστάσεις/βάρδιες)
               </label>
-              <label className="text-sm">
-                <div className="text-ink/50 mb-1">Ημεραργία (ημέρες)</div>
-                <input type="number" value={newDaysDayOff} onChange={(e) => setNewDaysDayOff(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
-              </label>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-sm">
-                <div className="text-ink/50 mb-1">Υπερωρίες (ώρες)</div>
-                <input type="number" value={newHoursOvertime} onChange={(e) => setNewHoursOvertime(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
-              </label>
-              <label className="text-sm">
-                <div className="text-ink/50 mb-1">Αργίες (ώρες)</div>
-                <input type="number" value={newHoursHolidays} onChange={(e) => setNewHoursHolidays(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
-              </label>
-              <label className="text-sm">
-                <div className="text-ink/50 mb-1">Έτους (ώρες)</div>
-                <input type="number" value={newHoursAnnual} onChange={(e) => setNewHoursAnnual(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
-              </label>
-              <label className="text-sm">
-                <div className="text-ink/50 mb-1">Συσσωρευμένη (ώρες)</div>
-                <input type="number" value={newHoursAccumulated} onChange={(e) => setNewHoursAccumulated(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={newFinalApprover} onChange={(e) => setNewFinalApprover(e.target.checked)} />
+                Διαχειριστής τελικής έγκρισης
               </label>
             </div>
+          )}
+
+          {(newRole === "EMPLOYEE" || newStaffMember) && (
+            <>
+              <label className="block text-sm">
+                <div className="text-ink/50 mb-1">Τηλέφωνο (8 ψηφία)</div>
+                <input required pattern="\d{8}" maxLength={8} value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ""))} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="99123456" />
+              </label>
+              <label className="block text-sm">
+                <div className="text-ink/50 mb-1">Κατηγορία προσωπικού</div>
+                <select value={newEmpType} onChange={(e) => setNewEmpType(e.target.value as "PERMANENT" | "TWP")} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                  <option value="TWP">Τ.Ω.Π.</option>
+                  <option value="PERMANENT">Μόνιμος</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <div className="text-ink/50 mb-1">Βαθμός</div>
+                <select required value={newRank} onChange={(e) => setNewRank(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                  <option value="" disabled>Επίλεξε βαθμό</option>
+                  {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <div className="text-ink/50 mb-1">Τμήμα</div>
+                <select required value={newDept} onChange={(e) => setNewDept(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                  <option value="" disabled>Επίλεξε τμήμα</option>
+                  {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </label>
+              {newDept && (
+                <label className="block text-sm">
+                  <div className="text-ink/50 mb-1">Ομάδα βάρδιας</div>
+                  <select value={newGroup} onChange={(e) => setNewGroup(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                    {groupsForDepartment(newDept).map((g) => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </label>
+              )}
+              {newDept === "Μονιάτης" && (
+                <div className="text-xs text-ink/40">Η βάρδια (Ημέρα/Νύχτα) υπολογίζεται αυτόματα κάθε μέρα από την ομάδα βάρδιας — δεν χρειάζεται χειροκίνητη ρύθμιση.</div>
+              )}
+              <div>
+                <div className="text-sm text-ink/50 mb-1">Προσόντα</div>
+                <div className="flex flex-wrap gap-2">
+                  {QUALIFICATIONS.map((q) => (
+                    <button key={q} type="button" onClick={() => toggleNewQual(q)}
+                      className={`text-xs px-2.5 py-1 rounded-full border ${newQuals.includes(q) ? "bg-ink text-white border-ink" : "border-ink/20 text-ink/60"}`}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {newEmpType === "PERMANENT" ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-sm">
+                    <div className="text-ink/50 mb-1">Άδεια (ημέρες)</div>
+                    <input type="number" value={newDaysLeave} onChange={(e) => setNewDaysLeave(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                  </label>
+                  <label className="text-sm">
+                    <div className="text-ink/50 mb-1">Ημεραργία (ημέρες)</div>
+                    <input type="number" value={newDaysDayOff} onChange={(e) => setNewDaysDayOff(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                  </label>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-sm">
+                    <div className="text-ink/50 mb-1">Υπερωρίες (ώρες)</div>
+                    <input type="number" value={newHoursOvertime} onChange={(e) => setNewHoursOvertime(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                  </label>
+                  <label className="text-sm">
+                    <div className="text-ink/50 mb-1">Αργίες (ώρες)</div>
+                    <input type="number" value={newHoursHolidays} onChange={(e) => setNewHoursHolidays(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                  </label>
+                  <label className="text-sm">
+                    <div className="text-ink/50 mb-1">Έτους (ώρες)</div>
+                    <input type="number" value={newHoursAnnual} onChange={(e) => setNewHoursAnnual(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                  </label>
+                  <label className="text-sm">
+                    <div className="text-ink/50 mb-1">Συσσωρευμένη (ώρες)</div>
+                    <input type="number" value={newHoursAccumulated} onChange={(e) => setNewHoursAccumulated(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                  </label>
+                </div>
+              )}
+            </>
           )}
 
           {newError && <div className="text-sm text-brick">{newError}</div>}

@@ -60,11 +60,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     data.role = body.role === "ADMIN" ? "ADMIN" : "EMPLOYEE";
   }
 
+  if (body.staffMember !== undefined) {
+    data.staffMember = !!body.staffMember;
+  }
+
+  if (body.finalApprover !== undefined) {
+    data.finalApprover = !!body.finalApprover;
+  }
+
   const updated = await prisma.user.update({ where: { id: params.id }, data });
 
   return NextResponse.json({
     id: updated.id, name: updated.name, department: updated.department, shiftGroup: updated.shiftGroup,
     phone: updated.phone, rank: updated.rank, employeeType: updated.employeeType, qualifications: updated.qualifications,
-    role: updated.role,
+    role: updated.role, staffMember: updated.staffMember, finalApprover: updated.finalApprover,
   });
 }

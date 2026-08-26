@@ -7,7 +7,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Μη εξουσιοδοτημένος." }, { status: 401 });
 
   const employees = await prisma.user.findMany({
-    where: { department: { not: null } },
+    where: { department: { not: null }, staffMember: true },
     select: { department: true },
     distinct: ["department"],
   });

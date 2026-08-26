@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
 
   const [users, approvedOnDay, cycles, approvedSwaps] = await Promise.all([
     prisma.user.findMany({
+      where: { staffMember: true },
       orderBy: { name: "asc" },
       select: { id: true, name: true, email: true, department: true, shiftGroup: true, phone: true, qualifications: true, rank: true, role: true },
     }),
