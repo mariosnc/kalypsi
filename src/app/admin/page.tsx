@@ -70,6 +70,28 @@ function addDaysISO(dateISO: string, n: number) {
   return d.toISOString().slice(0, 10);
 }
 
+const GR_MONTHS = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"];
+
+function monthGrid(monthStr: string): (string | null)[][] {
+  const [y, m] = monthStr.split("-").map(Number);
+  const first = new Date(Date.UTC(y, m - 1, 1));
+  const startDow = (first.getUTCDay() + 6) % 7; // Δευτέρα = 0
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(`${monthStr}-${String(d).padStart(2, "0")}`);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (string | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+}
+
+function shiftMonth(monthStr: string, delta: number): string {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 const rosterStatusLabel: Record<string, { label: string; color: string }> = {
   working: { label: "Εργασία", color: "text-teal" },
   off: { label: "OFF", color: "text-amber" },
@@ -87,7 +109,7 @@ const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "final" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "holidays" | "swaps" | "myleave" | "new">("pending");
+  const [tab, setTab] = useState<"pending" | "final" | "scheduling" | "stats" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "holidays" | "swaps" | "myleave" | "new">("pending");
   const [me, setMe] = useState<{
     id: string; name: string; finalApprover: boolean; staffMember: boolean; department: string | null;
     employeeType: "PERMANENT" | "TWP"; hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
@@ -156,6 +178,15 @@ export default function AdminPage() {
 
   const [weekStart, setWeekStart] = useState(mondayOf(todayISO()));
   const [weeklyRequests, setWeeklyRequests] = useState<PendingReq[]>([]);
+
+  const [schedulingKey, setSchedulingKey] = useState("");
+  const [schedulingMonth, setSchedulingMonth] = useState(todayISO().slice(0, 7));
+  const [schedulingDays, setSchedulingDays] = useState<CoverageDay[]>([]);
+
+  const loadSchedulingCoverage = useCallback(async (month: string) => {
+    const res = await fetch(`/api/coverage?month=${month}`);
+    if (res.ok) setSchedulingDays((await res.json()).days);
+  }, []);
 
   const [myRequests, setMyRequests] = useState<PendingReq[]>([]);
   const [myColleagues, setMyColleagues] = useState<{ id: string; name: string }[]>([]);
@@ -303,6 +334,15 @@ export default function AdminPage() {
   useEffect(() => { if (tab === "final") { loadFinalPending(); loadSwaps(); } }, [tab, loadFinalPending, loadSwaps]);
   useEffect(() => { if (tab === "general") loadEmployees(); }, [tab, loadEmployees]);
   useEffect(() => { if (tab === "weekly") loadWeekly(); }, [tab, loadWeekly]);
+  useEffect(() => { if (tab === "stats") { loadWeekly(); loadHolidays(); } }, [tab, loadWeekly, loadHolidays]);
+  useEffect(() => {
+    if (tab !== "scheduling") return;
+    if (!schedulingKey && rules.length > 0) {
+      const r = rules[0];
+      setSchedulingKey(r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department);
+    }
+    loadSchedulingCoverage(schedulingMonth);
+  }, [tab, schedulingMonth, rules, schedulingKey, loadSchedulingCoverage]);
   useEffect(() => { if (tab === "admins") loadAdmins(); }, [tab, loadAdmins]);
   useEffect(() => { if (tab === "myleave") loadMyRequests(); }, [tab, loadMyRequests]);
   useEffect(() => { setNewGroup(groupsForDepartment(newDept)[0] || ""); }, [newDept]);
@@ -516,8 +556,10 @@ export default function AdminPage() {
           ...(me?.finalApprover
             ? [["final", `Τελική έγκριση (${finalPending.length + swaps.filter((s) => s.status === "PENDING_FINAL").length})`]]
             : []),
+          ["scheduling", "Προγραμματισμός"],
           ["roster", "Ημερήσια κατάσταση"],
           ["general", "Γενική κατάσταση"],
+          ["stats", "Στατιστικά"],
           ["weekly", "Εβδομαδιαία αναφορά"],
           ["employees", "Υπάλληλοι"],
           ["swaps", `Ανταλλαγές${pendingSwaps.length ? ` (${pendingSwaps.length})` : ""}`],
@@ -537,41 +579,6 @@ export default function AdminPage() {
 
       {tab === "pending" && (
         <div className="space-y-3">
-          <div className="no-print bg-white rounded-xl border border-ink/10 p-3">
-            <div className="flex items-center gap-2 text-sm text-ink/50 mb-3"><Users size={15} /> Προσωπικό ανά τμήμα / βάρδια</div>
-            <div className="space-y-3">
-              {rules.map((r) => {
-                const todayCov = coverage.find((c) => c.date === todayISO())?.byDept?.[r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department];
-                return (
-                  <div key={`${r.department}-${r.shiftType}`} className="flex flex-wrap items-center gap-4">
-                    <span className="text-sm font-medium w-40">{r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department}</span>
-                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
-                      Πραγματικό προσωπικό
-                      <input type="number" min={0} value={r.actualStaff} onChange={(e) => updateRule(r.department, r.shiftType, "actualStaff", Number(e.target.value))}
-                        className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
-                      Ελάχιστο (καθημερινή)
-                      <input type="number" min={0} value={r.totalForce} onChange={(e) => updateRule(r.department, r.shiftType, "totalForce", Number(e.target.value))}
-                        className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
-                    </label>
-                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
-                      Ελάχιστο (αργία/Σ/Κ)
-                      <input type="number" min={0} placeholder="ίδιο" value={r.weekendMinStaff ?? ""} onChange={(e) => updateRule(r.department, r.shiftType, "weekendMinStaff", e.target.value === "" ? null : Number(e.target.value))}
-                        className="w-16 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
-                    </label>
-                    {todayCov !== undefined && (
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${todayCov > 0 ? "bg-teal/10 text-teal" : "bg-brick/10 text-brick"}`}>
-                        Σήμερα μπορούν να λείπουν: {Math.max(0, todayCov)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-              {rules.length === 0 && <span className="text-sm text-ink/40">Δεν υπάρχουν ακόμα τμήματα με υπαλλήλους.</span>}
-            </div>
-          </div>
-
           {pending.length === 0 && (
             <div className="text-sm text-ink/40 bg-white rounded-xl border border-ink/10 p-6 text-center">Καμία εκκρεμής αίτηση.</div>
           )}
@@ -699,6 +706,151 @@ export default function AdminPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === "scheduling" && (
+        <div className="space-y-4">
+          <div className="no-print bg-white rounded-xl border border-ink/10 p-3">
+            <div className="flex items-center gap-2 text-sm text-ink/50 mb-3"><Users size={15} /> Προσωπικό ανά τμήμα / βάρδια</div>
+            <div className="space-y-3">
+              {rules.map((r) => {
+                const key = r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department;
+                const todayCov = coverage.find((c) => c.date === todayISO())?.byDept?.[key];
+                return (
+                  <div key={`${r.department}-${r.shiftType}`} className="flex flex-wrap items-center gap-4">
+                    <span className="text-sm font-medium w-40">{key}</span>
+                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                      Πραγματικό προσωπικό
+                      <input type="number" min={0} value={r.actualStaff} onChange={(e) => updateRule(r.department, r.shiftType, "actualStaff", Number(e.target.value))}
+                        className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                      Ελάχιστο (καθημερινή)
+                      <input type="number" min={0} value={r.totalForce} onChange={(e) => updateRule(r.department, r.shiftType, "totalForce", Number(e.target.value))}
+                        className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                      Ελάχιστο (αργία/Σ/Κ)
+                      <input type="number" min={0} placeholder="ίδιο" value={r.weekendMinStaff ?? ""} onChange={(e) => updateRule(r.department, r.shiftType, "weekendMinStaff", e.target.value === "" ? null : Number(e.target.value))}
+                        className="w-16 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
+                    </label>
+                    {todayCov !== undefined && (
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${todayCov > 0 ? "bg-teal/10 text-teal" : "bg-brick/10 text-brick"}`}>
+                        Σήμερα μπορούν να λείπουν: {Math.max(0, todayCov)}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {rules.length === 0 && <span className="text-sm text-ink/40">Δεν υπάρχουν ακόμα τμήματα με υπαλλήλους.</span>}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-ink/10 p-5">
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+              <div className="font-disp text-xl">Ημερολόγιο διαθεσιμότητας</div>
+              <div className="flex items-center gap-3">
+                <select value={schedulingKey} onChange={(e) => setSchedulingKey(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 text-sm bg-white">
+                  {rules.map((r) => {
+                    const key = r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department;
+                    return <option key={key} value={key}>{key}</option>;
+                  })}
+                </select>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setSchedulingMonth((m) => shiftMonth(m, -1))} className="px-2 py-1 rounded-lg border border-ink/15 text-sm">‹</button>
+                  <span className="text-sm font-medium w-36 text-center">{GR_MONTHS[Number(schedulingMonth.slice(5, 7)) - 1]} {schedulingMonth.slice(0, 4)}</span>
+                  <button onClick={() => setSchedulingMonth((m) => shiftMonth(m, 1))} className="px-2 py-1 rounded-lg border border-ink/15 text-sm">›</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 mb-1 text-xs text-ink/40 text-center">
+              {["Δε", "Τρ", "Τε", "Πε", "Πα", "Σα", "Κυ"].map((d) => <div key={d} className="py-1">{d}</div>)}
+            </div>
+            {monthGrid(schedulingMonth).map((week, wi) => (
+              <div key={wi} className="grid grid-cols-7 gap-1 mb-1">
+                {week.map((dateISO, di) => {
+                  if (!dateISO) return <div key={di} />;
+                  const avail = schedulingDays.find((d) => d.date === dateISO)?.byDept?.[schedulingKey];
+                  const dayNum = Number(dateISO.slice(8, 10));
+                  const color = avail === undefined ? "text-ink/30" : avail > 0 ? "text-teal" : "text-brick";
+                  const bg = avail === undefined ? "bg-ink/[0.02]" : avail > 0 ? "bg-teal/5" : "bg-brick/5";
+                  return (
+                    <div key={di} className={`aspect-square rounded-lg flex flex-col items-center justify-center ${bg}`}>
+                      <span className="text-[10px] text-ink/40">{dayNum}</span>
+                      <span className={`text-sm font-mono font-medium ${color}`}>{avail !== undefined ? Math.max(0, avail) : "—"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            <div className="text-xs text-ink/40 mt-3">Ο αριθμός σε κάθε ημέρα δείχνει πόσα άτομα ακόμα μπορούν να πάρουν άδεια χωρίς να πέσει η κάλυψη κάτω από το ελάχιστο.</div>
+          </div>
+        </div>
+      )}
+
+      {tab === "stats" && (
+        <div className="space-y-3">
+          <div className="bg-white rounded-xl border border-ink/10 p-5 overflow-x-auto">
+            <div className="font-disp text-xl mb-4">Στατιστικά αδειών ανά υπάλληλο</div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-ink/40 border-b border-ink/10">
+                  <th className="py-2 pr-3 font-normal">Όνομα</th>
+                  <th className="py-2 pr-3 font-normal text-right">Σύνολο ημερών</th>
+                  <th className="py-2 pr-3 font-normal text-right">Ημέρα</th>
+                  <th className="py-2 pr-3 font-normal text-right">Νύχτα</th>
+                  <th className="py-2 pr-3 font-normal text-right">Καθημερινή</th>
+                  <th className="py-2 pr-3 font-normal text-right">Σάββατο</th>
+                  <th className="py-2 pr-3 font-normal text-right">Κυριακή</th>
+                  <th className="py-2 font-normal text-right">Αργία</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const holidaySet = new Set(holidays.map((h) => h.date.slice(0, 10)));
+                  const dayType = (iso: string): "weekday" | "saturday" | "sunday" | "holiday" => {
+                    if (holidaySet.has(iso)) return "holiday";
+                    const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+                    if (dow === 0) return "sunday";
+                    if (dow === 6) return "saturday";
+                    return "weekday";
+                  };
+                  const approved = weeklyRequests.filter((r) => r.status === "APPROVED");
+                  const byUser: Record<string, { name: string; totalDays: number; day: number; night: number; weekday: number; saturday: number; sunday: number; holiday: number }> = {};
+                  for (const r of approved) {
+                    const name = r.user.name;
+                    if (!byUser[name]) byUser[name] = { name, totalDays: 0, day: 0, night: 0, weekday: 0, saturday: 0, sunday: 0, holiday: 0 };
+                    let cur = r.startDate.slice(0, 10);
+                    const end = r.endDate.slice(0, 10);
+                    while (cur <= end) {
+                      byUser[name].totalDays += 1;
+                      const t = dayType(cur);
+                      byUser[name][t] += 1;
+                      if (r.shiftType === "DAY") byUser[name].day += 1;
+                      else if (r.shiftType === "NIGHT") byUser[name].night += 1;
+                      cur = addDaysISO(cur, 1);
+                    }
+                  }
+                  const rows = Object.values(byUser).sort((a, b) => a.name.localeCompare(b.name, "el"));
+                  if (rows.length === 0) return <tr><td colSpan={8} className="py-4 text-ink/40 text-sm">Δεν υπάρχουν ακόμα εγκεκριμένες άδειες.</td></tr>;
+                  return rows.map((u) => (
+                    <tr key={u.name} className="border-b border-ink/5">
+                      <td className="py-2 pr-3">{u.name}</td>
+                      <td className="py-2 pr-3 text-right font-mono">{u.totalDays}</td>
+                      <td className="py-2 pr-3 text-right font-mono text-ink/60">{u.day || "—"}</td>
+                      <td className="py-2 pr-3 text-right font-mono text-ink/60">{u.night || "—"}</td>
+                      <td className="py-2 pr-3 text-right font-mono text-ink/60">{u.weekday}</td>
+                      <td className="py-2 pr-3 text-right font-mono text-ink/60">{u.saturday}</td>
+                      <td className="py-2 pr-3 text-right font-mono text-ink/60">{u.sunday}</td>
+                      <td className="py-2 text-right font-mono text-ink/60">{u.holiday}</td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
