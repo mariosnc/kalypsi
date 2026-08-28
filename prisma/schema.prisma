@@ -120,12 +120,21 @@ model BalanceAdjustment {
 
 // Δύναμη (συνολικός αριθμός υπαλλήλων) ανά τμήμα
 model StaffingRule {
-  id         String @id @default(cuid())
-  department String
-  shiftType  String @default("") // "" για κανονικά τμήματα· "DAY"/"NIGHT" μόνο για Μονιάτης
-  totalForce Int    @default(0)
+  id              String @id @default(cuid())
+  department      String
+  shiftType       String @default("") // "" για κανονικά τμήματα· "DAY"/"NIGHT" μόνο για Μονιάτης
+  actualStaff     Int    @default(0) // πραγματικό σύνολο προσωπικού
+  totalForce      Int    @default(0) // ελάχιστο απαιτούμενο τις καθημερινές
+  weekendMinStaff Int? // ελάχιστο απαιτούμενο Σαββατοκύριακα/αργίες (αν κενό, ισχύει το ίδιο με τις καθημερινές)
 
   @@unique([department, shiftType])
+}
+
+// Ημερομηνίες που ορίζονται ως αργίες (επηρεάζουν το ελάχιστο απαιτούμενο προσωπικό)
+model Holiday {
+  id   String   @id @default(cuid())
+  date DateTime @unique
+  name String?
 }
 
 // Άδειες ιατρού / εκπαίδευση: αφαιρούν άτομα από τη Δύναμη μόνο για συγκεκριμένη περίοδο

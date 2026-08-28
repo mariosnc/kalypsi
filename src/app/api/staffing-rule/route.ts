@@ -19,14 +19,14 @@ export async function GET() {
         await prisma.staffingRule.upsert({
           where: { department_shiftType: { department: dep, shiftType: st } },
           update: {},
-          create: { department: dep, shiftType: st, totalForce: 0 },
+          create: { department: dep, shiftType: st, actualStaff: 0, totalForce: 0 },
         });
       }
     } else {
       await prisma.staffingRule.upsert({
         where: { department_shiftType: { department: dep, shiftType: "" } },
         update: {},
-        create: { department: dep, shiftType: "", totalForce: 0 },
+        create: { department: dep, shiftType: "", actualStaff: 0, totalForce: 0 },
       });
     }
   }
@@ -45,16 +45,17 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Μόνο ο διαχειριστής μπορεί να το αλλάξει." }, { status: 403 });
   }
 
-  const { department, totalForce, shiftType } = await req.json();
-  if (!department || typeof totalForce !== "number" || totalForce < 0) {
+  const { department, actualStaff, totalForce, weekendMinStaff, shiftType } = await req.json();
+  if (!department || typeof actualStaff !== "number" || actualStaff < 0 || typeof totalForce !== "number" || totalForce < 0) {
     return NextResponse.json({ error: "Μη έγκυρα δεδομένα." }, { status: 400 });
   }
   const st = department === "Μονιάτης" ? (shiftType === "NIGHT" ? "NIGHT" : "DAY") : "";
+  const weekendVal = weekendMinStaff === null || weekendMinStaff === undefined || weekendMinStaff === "" ? null : Number(weekendMinStaff);
 
   const rule = await prisma.staffingRule.upsert({
     where: { department_shiftType: { department, shiftType: st } },
-    update: { totalForce },
-    create: { department, shiftType: st, totalForce },
+    update: { actualStaff, totalForce, weekendMinStaff: weekendVal },
+    create: { department, shiftType: st, actualStaff, totalForce, weekendMinStaff: weekendVal },
   });
 
   return NextResponse.json(rule);

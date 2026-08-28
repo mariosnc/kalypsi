@@ -17,7 +17,7 @@ type RosterRow = {
   role?: string; status: "working" | "off" | "on_leave";
 };
 type CoverageDay = { date: string; byDept: Record<string, number> };
-type StaffingRuleRow = { id: string; department: string; shiftType: string; totalForce: number };
+type StaffingRuleRow = { id: string; department: string; shiftType: string; actualStaff: number; totalForce: number; weekendMinStaff: number | null };
 type EmployeeRow = {
   id: string; name: string; email: string; department: string | null; shiftGroup: string | null; shiftType: "DAY" | "NIGHT" | null;
   phone: string | null; qualifications: string[]; employeeType: "PERMANENT" | "TWP"; rank: string | null; role?: string;
@@ -87,7 +87,7 @@ const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "final" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "swaps" | "myleave" | "new">("pending");
+  const [tab, setTab] = useState<"pending" | "final" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "holidays" | "swaps" | "myleave" | "new">("pending");
   const [me, setMe] = useState<{
     id: string; name: string; finalApprover: boolean; staffMember: boolean; department: string | null;
     employeeType: "PERMANENT" | "TWP"; hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
@@ -118,6 +118,9 @@ export default function AdminPage() {
   const [absError, setAbsError] = useState("");
 
   const [shiftCycles, setShiftCycles] = useState<ShiftCycleRow[]>([]);
+  const [holidays, setHolidays] = useState<{ id: string; date: string; name: string | null }[]>([]);
+  const [newHolidayDate, setNewHolidayDate] = useState("");
+  const [newHolidayName, setNewHolidayName] = useState("");
   const [fixDept, setFixDept] = useState(DEPARTMENTS[0]);
   const [fixDate, setFixDate] = useState(todayISO());
   const [fixGroup, setFixGroup] = useState("");
@@ -260,6 +263,27 @@ export default function AdminPage() {
     const res = await fetch("/api/shift-cycle");
     if (res.ok) setShiftCycles(await res.json());
   }, []);
+
+  const loadHolidays = useCallback(async () => {
+    const res = await fetch("/api/holidays");
+    if (res.ok) setHolidays(await res.json());
+  }, []);
+
+  async function addHoliday(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newHolidayDate) return;
+    await fetch("/api/holidays", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: newHolidayDate, name: newHolidayName }),
+    });
+    setNewHolidayDate(""); setNewHolidayName("");
+    loadHolidays(); loadCoverage();
+  }
+
+  async function removeHoliday(id: string) {
+    await fetch(`/api/holidays/${id}`, { method: "DELETE" });
+    loadHolidays(); loadCoverage();
+  }
   const loadSwaps = useCallback(async () => {
     const res = await fetch("/api/swaps");
     if (res.ok) setSwaps(await res.json());
@@ -274,6 +298,7 @@ export default function AdminPage() {
   useEffect(() => { if (tab === "employees") loadEmployees(); }, [tab, loadEmployees]);
   useEffect(() => { if (tab === "absences") loadAbsences(); }, [tab, loadAbsences]);
   useEffect(() => { if (tab === "shifts") loadShiftCycles(); }, [tab, loadShiftCycles]);
+  useEffect(() => { if (tab === "holidays") loadHolidays(); }, [tab, loadHolidays]);
   useEffect(() => { if (tab === "swaps") loadSwaps(); }, [tab, loadSwaps]);
   useEffect(() => { if (tab === "final") { loadFinalPending(); loadSwaps(); } }, [tab, loadFinalPending, loadSwaps]);
   useEffect(() => { if (tab === "general") loadEmployees(); }, [tab, loadEmployees]);
@@ -292,11 +317,18 @@ export default function AdminPage() {
     loadPending(); loadFinalPending(); loadCoverage();
   }
 
-  async function updateTotalForce(department: string, shiftType: string, v: number) {
-    setRules((rs) => rs.map((r) => (r.department === department && r.shiftType === shiftType ? { ...r, totalForce: v } : r)));
+  async function updateRule(department: string, shiftType: string, field: "actualStaff" | "totalForce" | "weekendMinStaff", v: number | null) {
+    setRules((rs) => rs.map((r) => (r.department === department && r.shiftType === shiftType ? { ...r, [field]: v } : r)));
+    const current = rules.find((r) => r.department === department && r.shiftType === shiftType);
+    if (!current) return;
     await fetch("/api/staffing-rule", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ department, shiftType, totalForce: v }),
+      body: JSON.stringify({
+        department, shiftType,
+        actualStaff: field === "actualStaff" ? v : current.actualStaff,
+        totalForce: field === "totalForce" ? v : current.totalForce,
+        weekendMinStaff: field === "weekendMinStaff" ? v : current.weekendMinStaff,
+      }),
     });
     loadCoverage();
   }
@@ -491,6 +523,7 @@ export default function AdminPage() {
           ["swaps", `Ανταλλαγές${pendingSwaps.length ? ` (${pendingSwaps.length})` : ""}`],
           ["absences", "Ιατρού / Εκπαίδευση"],
           ["shifts", "Βάρδιες"],
+          ["holidays", "Αργίες"],
           ...(me?.finalApprover ? [["admins", "Διαχειριστές"]] : []),
           ...(me?.staffMember ? [["myleave", "Η άδειά μου"]] : []),
           ["new", "Νέος υπάλληλος"],
@@ -504,16 +537,37 @@ export default function AdminPage() {
 
       {tab === "pending" && (
         <div className="space-y-3">
-          <div className="no-print bg-white rounded-xl border border-ink/10 p-3 w-fit">
-            <div className="flex items-center gap-2 text-sm text-ink/50 mb-2"><Users size={15} /> Δύναμη ανά τμήμα</div>
-            <div className="flex flex-wrap gap-3">
-              {rules.map((r) => (
-                <label key={`${r.department}-${r.shiftType}`} className="flex items-center gap-2 text-sm">
-                  <span className="text-ink/70">{r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department}</span>
-                  <input type="number" min={0} value={r.totalForce} onChange={(e) => updateTotalForce(r.department, r.shiftType, Number(e.target.value))}
-                    className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono" />
-                </label>
-              ))}
+          <div className="no-print bg-white rounded-xl border border-ink/10 p-3">
+            <div className="flex items-center gap-2 text-sm text-ink/50 mb-3"><Users size={15} /> Προσωπικό ανά τμήμα / βάρδια</div>
+            <div className="space-y-3">
+              {rules.map((r) => {
+                const todayCov = coverage.find((c) => c.date === todayISO())?.byDept?.[r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department];
+                return (
+                  <div key={`${r.department}-${r.shiftType}`} className="flex flex-wrap items-center gap-4">
+                    <span className="text-sm font-medium w-40">{r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department}</span>
+                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                      Πραγματικό προσωπικό
+                      <input type="number" min={0} value={r.actualStaff} onChange={(e) => updateRule(r.department, r.shiftType, "actualStaff", Number(e.target.value))}
+                        className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                      Ελάχιστο (καθημερινή)
+                      <input type="number" min={0} value={r.totalForce} onChange={(e) => updateRule(r.department, r.shiftType, "totalForce", Number(e.target.value))}
+                        className="w-14 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-ink/60">
+                      Ελάχιστο (αργία/Σ/Κ)
+                      <input type="number" min={0} placeholder="ίδιο" value={r.weekendMinStaff ?? ""} onChange={(e) => updateRule(r.department, r.shiftType, "weekendMinStaff", e.target.value === "" ? null : Number(e.target.value))}
+                        className="w-16 border border-ink/15 rounded-lg px-2 py-1 font-mono text-sm" />
+                    </label>
+                    {todayCov !== undefined && (
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${todayCov > 0 ? "bg-teal/10 text-teal" : "bg-brick/10 text-brick"}`}>
+                        Σήμερα μπορούν να λείπουν: {Math.max(0, todayCov)}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
               {rules.length === 0 && <span className="text-sm text-ink/40">Δεν υπάρχουν ακόμα τμήματα με υπαλλήλους.</span>}
             </div>
           </div>
@@ -1126,6 +1180,39 @@ export default function AdminPage() {
               <button type="submit" className="self-end bg-ink text-white rounded-lg px-4 py-2 text-sm">Ορισμός</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {tab === "holidays" && (
+        <div className="space-y-4">
+          <form onSubmit={addHoliday} className="bg-white rounded-xl border border-ink/10 p-5 space-y-3">
+            <div className="font-disp text-lg">Νέα αργία</div>
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Ημερομηνία</div>
+                <input type="date" required value={newHolidayDate} onChange={(e) => setNewHolidayDate(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Ονομασία (προαιρετικό)</div>
+                <input value={newHolidayName} onChange={(e) => setNewHolidayName(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" placeholder="π.χ. Πρωτοχρονιά" />
+              </label>
+              <button type="submit" className="bg-teal text-white rounded-lg px-4 py-2 text-sm font-medium">Προσθήκη</button>
+            </div>
+            <div className="text-xs text-ink/40">Τις μέρες αυτές (και τα Σαββατοκύριακα) ισχύει το ελάχιστο προσωπικό «αργίας/Σ.Κ.» αντί του κανονικού.</div>
+          </form>
+
+          <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+            {holidays.length === 0 && <div className="p-4 text-sm text-ink/40">Δεν έχουν οριστεί αργίες.</div>}
+            {holidays.map((h) => (
+              <div key={h.id} className="p-4 flex items-center justify-between">
+                <div className="text-sm">
+                  <span className="font-medium">{fmt(h.date)}</span>
+                  {h.name && <span className="text-ink/50 ml-2">{h.name}</span>}
+                </div>
+                <button onClick={() => removeHoliday(h.id)} className="text-ink/40 hover:text-brick"><Trash2 size={16} /></button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -8,6 +8,11 @@ function effectiveKey(department: string, shiftType?: string | null) {
   return department;
 }
 
+function isWeekend(d: Date) {
+  const day = d.getUTCDay();
+  return day === 0 || day === 6;
+}
+
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Μη εξουσιοδοτημένος." }, { status: 401 });
@@ -19,7 +24,7 @@ export async function GET(req: NextRequest) {
   const start = new Date(Date.UTC(year, mo - 1, 1));
   const end = new Date(Date.UTC(year, mo, 0));
 
-  const [rules, approved, absences] = await Promise.all([
+  const [rules, approved, absences, holidays] = await Promise.all([
     prisma.staffingRule.findMany(),
     prisma.leaveRequest.findMany({
       where: { status: "APPROVED", startDate: { lte: end }, endDate: { gte: start } },
@@ -28,15 +33,28 @@ export async function GET(req: NextRequest) {
     prisma.staffAbsence.findMany({
       where: { startDate: { lte: end }, endDate: { gte: start } },
     }),
+    prisma.holiday.findMany({ where: { date: { gte: start, lte: end } } }),
   ]);
 
-  const totalForceByKey: Record<string, number> = {};
-  for (const r of rules) totalForceByKey[effectiveKey(r.department, r.shiftType)] = r.totalForce;
-  const keys = Object.keys(totalForceByKey).sort();
+  const holidaySet = new Set(holidays.map((h) => h.date.toISOString().slice(0, 10)));
+
+  const actualByKey: Record<string, number> = {};
+  const minWeekdayByKey: Record<string, number> = {};
+  const minWeekendByKey: Record<string, number> = {};
+  for (const r of rules) {
+    const k = effectiveKey(r.department, r.shiftType);
+    actualByKey[k] = r.actualStaff;
+    minWeekdayByKey[k] = r.totalForce;
+    minWeekendByKey[k] = r.weekendMinStaff ?? r.totalForce;
+  }
+  const keys = Object.keys(actualByKey).sort();
 
   const days: { date: string; byDept: Record<string, number> }[] = [];
   const cur = new Date(start);
   while (cur <= end) {
+    const iso = cur.toISOString().slice(0, 10);
+    const isSpecialDay = isWeekend(cur) || holidaySet.has(iso);
+
     const onLeaveByKey: Record<string, Set<string>> = {};
     for (const r of approved) {
       if (r.startDate <= cur && r.endDate >= cur) {
@@ -61,11 +79,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Διαθέσιμες θέσεις άδειας = Πραγματικό προσωπικό - Ελάχιστο (καθημερινή/αργία) - απουσίες - ήδη σε άδεια
     const byDept: Record<string, number> = {};
     for (const k of keys) {
-      byDept[k] = (totalForceByKey[k] || 0) - (absentByKey[k] || 0) - (onLeaveByKey[k]?.size || 0);
+      const minRequired = isSpecialDay ? minWeekendByKey[k] : minWeekdayByKey[k];
+      byDept[k] = (actualByKey[k] || 0) - (minRequired || 0) - (absentByKey[k] || 0) - (onLeaveByKey[k]?.size || 0);
     }
-    days.push({ date: cur.toISOString().slice(0, 10), byDept });
+    days.push({ date: iso, byDept });
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
 
