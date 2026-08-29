@@ -404,6 +404,18 @@ export default function AdminPage() {
     setResetMsg((m) => ({ ...m, [id]: res.ok ? `Νέος κωδικός: ${data.newPassword}` : data.error || "Σφάλμα" }));
   }
 
+  async function deleteEmployee(id: string, name: string) {
+    if (!confirm(`Σίγουρα θέλεις να διαγράψεις οριστικά τον/την ${name}; Θα διαγραφεί και όλο το ιστορικό αδειών/ανταλλαγών του/της. Δεν αναιρείται.`)) return;
+    const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    loadEmployees();
+    loadAdmins();
+  }
+
   async function runRollover() {
     if (!confirm("Σίγουρα θέλεις να εκτελέσεις τη μεταφορά αδειών τέλους έτους για όλο το προσωπικό; Δεν αναιρείται.")) return;
     const res = await fetch("/api/admin/rollover", { method: "POST" });
@@ -1236,6 +1248,9 @@ export default function AdminPage() {
                       <div className="flex gap-2">
                         <button onClick={() => saveEmployee(e.id)} className="text-sm px-4 py-2 rounded-lg bg-ink text-white">Αποθήκευση στοιχείων</button>
                         <button onClick={() => resetPassword(e.id)} className="text-sm px-4 py-2 rounded-lg border border-ink/15 text-ink/70">Επαναφορά κωδικού</button>
+                        {me?.finalApprover && (
+                          <button onClick={() => deleteEmployee(e.id, e.name)} className="text-sm px-4 py-2 rounded-lg border border-brick/30 text-brick hover:bg-brick/5">Διαγραφή υπαλλήλου</button>
+                        )}
                       </div>
                       {resetMsg[e.id] && <div className="text-xs text-teal">{resetMsg[e.id]}</div>}
 
@@ -1447,6 +1462,9 @@ export default function AdminPage() {
                     Τελική έγκριση
                   </label>
                   <button onClick={() => resetPassword(a.id)} className="text-sm px-3 py-1.5 rounded-lg border border-ink/15 text-ink/70">Επαναφορά κωδικού</button>
+                  {a.id !== me?.id && (
+                    <button onClick={() => deleteEmployee(a.id, a.name)} className="text-sm px-3 py-1.5 rounded-lg border border-brick/30 text-brick hover:bg-brick/5">Διαγραφή</button>
+                  )}
                 </div>
                 {resetMsg[a.id] && <div className="text-xs text-teal w-full">{resetMsg[a.id]}</div>}
               </div>
