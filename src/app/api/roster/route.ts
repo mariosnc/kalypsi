@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 
   const day = new Date(date + "T00:00:00Z");
 
-  const [users, approvedOnDay, cycles, approvedSwaps] = await Promise.all([
+  const [users, approvedOnDay, cycles, approvedSwaps, transfersToday] = await Promise.all([
     prisma.user.findMany({
       where: { staffMember: true },
       orderBy: { name: "asc" },
@@ -34,11 +34,13 @@ export async function GET(req: NextRequest) {
     }),
     prisma.shiftCycle.findMany({ where: { department: { in: DEPARTMENTS } } }),
     prisma.shiftSwap.findMany({ where: { status: "APPROVED", date: day } }),
+    prisma.departmentTransfer.findMany({ where: { date: day } }),
   ]);
 
   const onLeaveIds = new Set(approvedOnDay.map((r) => r.userId));
   const swapOffIds = new Set(approvedSwaps.map((s) => s.requesterId));
   const swapCoverIds = new Set(approvedSwaps.map((s) => s.colleagueId));
+  const transferByUser = new Map(transfersToday.map((t) => [t.userId, t.toDepartment]));
 
   const workingGroupByDept: Record<string, string> = {};
   let moniatisDayGroup = "";
@@ -70,12 +72,16 @@ export async function GET(req: NextRequest) {
   const roster = users
     .map((u) => {
       const onLeave = onLeaveIds.has(u.id);
-      const dept = u.department || "";
+      const transferredTo = transferByUser.get(u.id);
+      const dept = transferredTo || u.department || "";
 
       let onShift: boolean;
       let shiftType: "DAY" | "NIGHT" | null = null;
 
-      if (dept === "Μονιάτης") {
+      if (transferredTo) {
+        // προσωρινή μετακίνηση: θεωρείται σε υπηρεσία στο νέο τμήμα, χωρίς αντιστοίχιση ομάδας/βάρδιας
+        onShift = true;
+      } else if (dept === "Μονιάτης") {
         if (u.shiftGroup === moniatisDayGroup) {
           onShift = true;
           shiftType = "DAY";
@@ -99,7 +105,8 @@ export async function GET(req: NextRequest) {
         id: u.id,
         name: u.name,
         email: u.email,
-        department: u.department,
+        department: dept,
+        transferred: !!transferredTo,
         rank: u.rank,
         shiftGroup: u.shiftGroup,
         shiftType,

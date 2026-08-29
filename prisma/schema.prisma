@@ -87,6 +87,7 @@ model User {
   adjustments          BalanceAdjustment[]
   swapRequestsSent     ShiftSwap[]         @relation("SwapRequester")
   swapRequestsReceived ShiftSwap[]         @relation("SwapColleague")
+  departmentTransfers  DepartmentTransfer[]
 }
 
 model LeaveRequest {
@@ -174,4 +175,19 @@ model ShiftSwap {
 
   @@index([requesterId])
   @@index([colleagueId])
+}
+
+// Προσωρινή μετακίνηση υπαλλήλου σε άλλο τμήμα για συγκεκριμένη ημέρα
+model DepartmentTransfer {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  fromDepartment String?
+  toDepartment   String
+  date           DateTime
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([date])
 }

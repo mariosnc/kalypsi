@@ -14,7 +14,11 @@ type PendingReq = {
 type RosterRow = {
   id: string; name: string; email: string; department: string | null; rank: string | null;
   shiftGroup: string | null; shiftType: "DAY" | "NIGHT" | null; phone: string | null; qualifications: string[];
-  role?: string; status: "working" | "off" | "on_leave";
+  role?: string; status: "working" | "off" | "on_leave"; transferred?: boolean;
+};
+type TransferRow = {
+  id: string; date: string; toDepartment: string; fromDepartment: string | null; reason: string | null;
+  user: { id: string; name: string; department: string | null };
 };
 type CoverageDay = { date: string; byDept: Record<string, number> };
 type StaffingRuleRow = { id: string; department: string; shiftType: string; actualStaff: number; totalForce: number; weekendMinStaff: number | null };
@@ -109,7 +113,7 @@ const swapBadge: Record<string, { label: string; bg: string; fg: string }> = {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<"pending" | "final" | "scheduling" | "stats" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "holidays" | "swaps" | "myleave" | "new">("pending");
+  const [tab, setTab] = useState<"pending" | "final" | "scheduling" | "stats" | "roster" | "general" | "weekly" | "employees" | "admins" | "absences" | "shifts" | "holidays" | "transfers" | "swaps" | "myleave" | "new">("pending");
   const [me, setMe] = useState<{
     id: string; name: string; finalApprover: boolean; staffMember: boolean; department: string | null;
     employeeType: "PERMANENT" | "TWP"; hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
@@ -147,6 +151,14 @@ export default function AdminPage() {
   const [fixDept, setFixDept] = useState(DEPARTMENTS[0]);
   const [fixDate, setFixDate] = useState(todayISO());
   const [fixGroup, setFixGroup] = useState("");
+
+  const [transfers, setTransfers] = useState<TransferRow[]>([]);
+  const [xferEmployee, setXferEmployee] = useState("");
+  const [xferDept, setXferDept] = useState(DEPARTMENTS[0]);
+  const [xferStart, setXferStart] = useState(todayISO());
+  const [xferEnd, setXferEnd] = useState(todayISO());
+  const [xferReason, setXferReason] = useState("");
+  const [xferError, setXferError] = useState("");
 
   const [swaps, setSwaps] = useState<SwapRow[]>([]);
 
@@ -302,6 +314,33 @@ export default function AdminPage() {
     if (res.ok) setHolidays(await res.json());
   }, []);
 
+  const loadTransfers = useCallback(async () => {
+    const res = await fetch("/api/transfers");
+    if (res.ok) setTransfers(await res.json());
+  }, []);
+
+  async function addTransfer(e: React.FormEvent) {
+    e.preventDefault();
+    setXferError("");
+    if (!xferEmployee) { setXferError("Επίλεξε υπάλληλο."); return; }
+    const res = await fetch("/api/transfers", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: xferEmployee, toDepartment: xferDept, startDate: xferStart, endDate: xferEnd, reason: xferReason }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setXferError(data.error || "Κάτι πήγε στραβά.");
+      return;
+    }
+    setXferEmployee(""); setXferReason("");
+    loadTransfers();
+  }
+
+  async function removeTransfer(id: string) {
+    await fetch(`/api/transfers/${id}`, { method: "DELETE" });
+    loadTransfers();
+  }
+
   async function addHoliday(e: React.FormEvent) {
     e.preventDefault();
     if (!newHolidayDate) return;
@@ -332,11 +371,12 @@ export default function AdminPage() {
   useEffect(() => { if (tab === "absences") loadAbsences(); }, [tab, loadAbsences]);
   useEffect(() => { if (tab === "shifts") loadShiftCycles(); }, [tab, loadShiftCycles]);
   useEffect(() => { if (tab === "holidays") loadHolidays(); }, [tab, loadHolidays]);
+  useEffect(() => { if (tab === "transfers") { loadTransfers(); loadEmployees(); } }, [tab, loadTransfers, loadEmployees]);
   useEffect(() => { if (tab === "swaps") loadSwaps(); }, [tab, loadSwaps]);
   useEffect(() => { if (tab === "final") { loadFinalPending(); loadSwaps(); } }, [tab, loadFinalPending, loadSwaps]);
   useEffect(() => { if (tab === "general") loadEmployees(); }, [tab, loadEmployees]);
   useEffect(() => { if (tab === "weekly") loadWeekly(); }, [tab, loadWeekly]);
-  useEffect(() => { if (tab === "stats") { loadWeekly(); loadHolidays(); } }, [tab, loadWeekly, loadHolidays]);
+  useEffect(() => { if (tab === "stats") { loadWeekly(); loadHolidays(); loadTransfers(); } }, [tab, loadWeekly, loadHolidays, loadTransfers]);
   useEffect(() => {
     if (tab !== "scheduling") return;
     if (!schedulingKey && rules.length > 0) {
@@ -584,6 +624,7 @@ export default function AdminPage() {
           ["absences", "Ιατρού / Εκπαίδευση"],
           ["shifts", "Βάρδιες"],
           ["holidays", "Αργίες"],
+          ["transfers", "Μετακινήσεις"],
           ...(me?.finalApprover ? [["admins", "Διαχειριστές"]] : []),
           ...(me?.staffMember ? [["myleave", "Η άδειά μου"]] : []),
           ["new", "Νέος υπάλληλος"],
@@ -907,6 +948,33 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+
+          <div className="bg-white rounded-xl border border-ink/10 p-5 overflow-x-auto">
+            <div className="font-disp text-xl mb-4">Αλλαγές σταθμού</div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-ink/40 border-b border-ink/10">
+                  <th className="py-2 pr-3 font-normal">Ημερομηνία</th>
+                  <th className="py-2 pr-3 font-normal">Υπάλληλος</th>
+                  <th className="py-2 pr-3 font-normal">Από</th>
+                  <th className="py-2 pr-3 font-normal">Προς</th>
+                  <th className="py-2 font-normal">Αιτιολογία</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfers.length === 0 && <tr><td colSpan={5} className="py-4 text-ink/40 text-sm">Δεν υπάρχουν καταγεγραμμένες μετακινήσεις.</td></tr>}
+                {transfers.map((t) => (
+                  <tr key={t.id} className="border-b border-ink/5">
+                    <td className="py-2 pr-3">{fmt(t.date)}</td>
+                    <td className="py-2 pr-3">{t.user.name}</td>
+                    <td className="py-2 pr-3 text-ink/60">{t.fromDepartment}</td>
+                    <td className="py-2 pr-3 text-ink/60">{t.toDepartment}</td>
+                    <td className="py-2 text-ink/60">{t.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -970,7 +1038,7 @@ export default function AdminPage() {
                         lastDept = dept; lastShift = shiftVal;
                         return (
                           <tr key={e.id} className="border-b border-ink/5">
-                            <td className="py-2">{dept}</td>
+                            <td className="py-2">{dept}{e.transferred && <span className="text-amber ml-1" title="Προσωρινή μετακίνηση">↪</span>}</td>
                             <td className="py-2 text-ink/50">{showShift ? shiftVal : ""}</td>
                             <td className="py-2">{e.rank} {e.email} {e.name}</td>
                             <td className="py-2 text-ink/50 text-xs">{e.qualifications.join(", ")}</td>
@@ -1402,6 +1470,60 @@ export default function AdminPage() {
                   {h.name && <span className="text-ink/50 ml-2">{h.name}</span>}
                 </div>
                 <button onClick={() => removeHoliday(h.id)} className="text-ink/40 hover:text-brick"><Trash2 size={16} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "transfers" && (
+        <div className="space-y-4">
+          <form onSubmit={addTransfer} className="bg-white rounded-xl border border-ink/10 p-5 space-y-3">
+            <div className="font-disp text-lg">Νέα προσωρινή μετακίνηση</div>
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Υπάλληλος</div>
+                <select required value={xferEmployee} onChange={(e) => setXferEmployee(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white min-w-[180px]">
+                  <option value="">Επίλεξε</option>
+                  {sortByRankThenUsername(employees).map((e) => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.department})</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Μετακίνηση σε</div>
+                <select value={xferDept} onChange={(e) => setXferDept(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2 bg-white">
+                  {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Από</div>
+                <input type="date" required value={xferStart} onChange={(e) => setXferStart(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm">
+                <div className="text-ink/50 mb-1">Έως</div>
+                <input type="date" required value={xferEnd} onChange={(e) => setXferEnd(e.target.value)} className="border border-ink/15 rounded-lg px-3 py-2" />
+              </label>
+              <label className="text-sm flex-1 min-w-[160px]">
+                <div className="text-ink/50 mb-1">Αιτιολογία (προαιρετικό)</div>
+                <input value={xferReason} onChange={(e) => setXferReason(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" placeholder="π.χ. κάλυψη ελλείψεων" />
+              </label>
+              <button type="submit" className="bg-teal text-white rounded-lg px-4 py-2 text-sm font-medium">Προσθήκη</button>
+            </div>
+            {xferError && <div className="text-sm text-brick">{xferError}</div>}
+            <div className="text-xs text-ink/40">Ο υπάλληλος θα εμφανίζεται στην ημερήσια κατάσταση κάτω από το νέο τμήμα, μόνο για τις επιλεγμένες ημέρες.</div>
+          </form>
+
+          <div className="bg-white rounded-xl border border-ink/10 divide-y divide-ink/8">
+            {transfers.length === 0 && <div className="p-4 text-sm text-ink/40">Δεν υπάρχουν καταχωρημένες μετακινήσεις.</div>}
+            {transfers.map((t) => (
+              <div key={t.id} className="p-4 flex items-center justify-between gap-3">
+                <div className="text-sm">
+                  <span className="font-medium">{t.user.name}</span>
+                  <span className="text-ink/50 ml-2">{fmt(t.date)} · {t.fromDepartment} → {t.toDepartment}</span>
+                  {t.reason && <span className="text-ink/40 ml-2">({t.reason})</span>}
+                </div>
+                <button onClick={() => removeTransfer(t.id)} className="text-ink/40 hover:text-brick"><Trash2 size={16} /></button>
               </div>
             ))}
           </div>
