@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     where,
     include: {
       user: {
-        select: { id: true, name: true, department: true, employeeType: true, hoursOvertime: true, hoursHolidays: true, hoursAnnual: true, hoursAccumulated: true, daysLeave: true, daysDayOff: true },
+        select: { id: true, name: true, department: true, employeeType: true, hoursOvertime: true, hoursHolidays: true, hoursAnnual: true, hoursAccumulated: true, daysLeave: true, daysDayOff: true, daysAccumulated: true },
       },
     },
     orderBy: { createdAt: "desc" },

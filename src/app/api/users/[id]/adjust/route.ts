@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-const FIELD_BY_CATEGORY: Record<string, "hoursOvertime" | "hoursHolidays" | "hoursAnnual" | "hoursAccumulated" | "daysLeave" | "daysDayOff"> = {
+const FIELD_BY_CATEGORY: Record<string, "hoursOvertime" | "hoursHolidays" | "hoursAnnual" | "hoursAccumulated" | "daysLeave" | "daysDayOff" | "daysAccumulated"> = {
   OVERTIME: "hoursOvertime",
   HOLIDAYS: "hoursHolidays",
   ANNUAL: "hoursAnnual",
   ACCUMULATED: "hoursAccumulated",
   DAYS_LEAVE: "daysLeave",
   DAYS_DAYOFF: "daysDayOff",
+  DAYS_ACCUMULATED: "daysAccumulated",
 };
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -44,5 +45,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     hoursAccumulated: result.hoursAccumulated,
     daysLeave: result.daysLeave,
     daysDayOff: result.daysDayOff,
+    daysAccumulated: result.daysAccumulated,
   });
 }

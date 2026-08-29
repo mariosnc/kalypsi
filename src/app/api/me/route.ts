@@ -28,5 +28,6 @@ export async function GET() {
     hoursAccumulated: user.hoursAccumulated,
     daysLeave: user.daysLeave,
     daysDayOff: user.daysDayOff,
+    daysAccumulated: user.daysAccumulated,
   });
 }

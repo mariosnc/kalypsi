@@ -7,7 +7,7 @@ import { PlusCircle, Send, LogOut, AlertTriangle, KeyRound, Repeat } from "lucid
 type Me = {
   id: string; name: string; role: string; department: string | null; shiftGroup: string | null; employeeType: "PERMANENT" | "TWP";
   hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
-  daysLeave: number; daysDayOff: number;
+  daysLeave: number; daysDayOff: number; daysAccumulated: number;
 };
 type Req = {
   id: string; startDate: string; endDate: string; hours: number; days?: number | null;
@@ -21,6 +21,28 @@ type Swap = {
 };
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("el-GR");
+
+const GR_MONTHS = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"];
+
+function monthGrid(monthStr: string): (string | null)[][] {
+  const [y, m] = monthStr.split("-").map(Number);
+  const first = new Date(Date.UTC(y, m - 1, 1));
+  const startDow = (first.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(`${monthStr}-${String(d).padStart(2, "0")}`);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (string | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+}
+
+function shiftMonth(monthStr: string, delta: number): string {
+  const [y, m] = monthStr.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 
 const badge: Record<string, { label: string; bg: string; fg: string }> = {
   PENDING: { label: "Εκκρεμεί", bg: "#C97A2E1A", fg: "#C97A2E" },
@@ -61,6 +83,15 @@ export default function Dashboard() {
   const [swapDate, setSwapDate] = useState("");
   const [swapError, setSwapError] = useState("");
 
+  const [calMonth, setCalMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [calShift, setCalShift] = useState<"DAY" | "NIGHT">("DAY");
+  const [calDays, setCalDays] = useState<CoverageDay[]>([]);
+
+  const loadCalendar = useCallback(async (month: string) => {
+    const res = await fetch(`/api/coverage?month=${month}`);
+    if (res.ok) setCalDays((await res.json()).days);
+  }, []);
+
   const load = useCallback(async () => {
     const [meRes, reqRes] = await Promise.all([fetch("/api/me"), fetch("/api/requests")]);
     if (meRes.ok) setMe(await meRes.json());
@@ -77,6 +108,24 @@ export default function Dashboard() {
     load();
     loadSwaps();
   }, [load, loadSwaps]);
+
+  useEffect(() => {
+    loadCalendar(calMonth);
+  }, [calMonth, loadCalendar]);
+
+  // ανίχνευση της σημερινής βάρδιας (Ημέρα/Νύχτα) για μέλη του Μονιάτη, ώστε να προεπιλέγεται σωστά στο ημερολόγιο
+  useEffect(() => {
+    async function detectShift() {
+      if (me?.department !== "Μονιάτης") return;
+      const res = await fetch(`/api/shift-cycle?date=${new Date().toISOString().slice(0, 10)}`);
+      if (res.ok) {
+        const cycles = await res.json();
+        const moniatis = cycles.find((c: any) => c.department === "Μονιάτης");
+        if (moniatis) setCalShift(moniatis.workingGroup === me.shiftGroup ? "DAY" : "NIGHT");
+      }
+    }
+    detectShift();
+  }, [me]);
 
   useEffect(() => {
     async function check() {
@@ -246,15 +295,20 @@ export default function Dashboard() {
       </div>
 
       {isPermanent ? (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-xl border border-ink/10 p-5">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white rounded-xl border border-ink/10 p-4">
             <div className="text-sm text-ink/50 mb-1">Άδεια</div>
-            <div className="font-disp text-3xl font-mono">{me.daysLeave}</div>
+            <div className="font-disp text-2xl font-mono">{me.daysLeave}</div>
             <div className="text-xs text-ink/40">ημέρες</div>
           </div>
-          <div className="bg-white rounded-xl border border-ink/10 p-5">
+          <div className="bg-white rounded-xl border border-ink/10 p-4">
             <div className="text-sm text-ink/50 mb-1">Ημεραργία</div>
-            <div className="font-disp text-3xl font-mono">{me.daysDayOff}</div>
+            <div className="font-disp text-2xl font-mono">{me.daysDayOff}</div>
+            <div className="text-xs text-ink/40">ημέρες</div>
+          </div>
+          <div className="bg-white rounded-xl border border-ink/10 p-4">
+            <div className="text-sm text-ink/50 mb-1">Συσσωρευμένη</div>
+            <div className="font-disp text-2xl font-mono">{me.daysAccumulated}</div>
             <div className="text-xs text-ink/40">ημέρες</div>
           </div>
         </div>
@@ -275,6 +329,47 @@ export default function Dashboard() {
           <div className="col-span-2 sm:col-span-4 text-xs text-ink/40">Σύνολο: <span className="font-mono">{totalHours}</span> ώρες</div>
         </div>
       )}
+
+      <div className="bg-white rounded-xl border border-ink/10 p-5">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <div className="font-disp text-lg">Διαθεσιμότητα άδειας — {me.department}</div>
+          <div className="flex items-center gap-3">
+            {me.department === "Μονιάτης" && (
+              <div className="flex gap-1">
+                <button onClick={() => setCalShift("DAY")} className={`text-xs px-2.5 py-1 rounded-full ${calShift === "DAY" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Ημέρα</button>
+                <button onClick={() => setCalShift("NIGHT")} className={`text-xs px-2.5 py-1 rounded-full ${calShift === "NIGHT" ? "bg-ink text-white" : "bg-ink/5 text-ink/60"}`}>Νύχτα</button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <button onClick={() => setCalMonth((m) => shiftMonth(m, -1))} className="px-2 py-1 rounded-lg border border-ink/15 text-xs">‹</button>
+              <span className="text-xs font-medium w-28 text-center">{GR_MONTHS[Number(calMonth.slice(5, 7)) - 1]} {calMonth.slice(0, 4)}</span>
+              <button onClick={() => setCalMonth((m) => shiftMonth(m, 1))} className="px-2 py-1 rounded-lg border border-ink/15 text-xs">›</button>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-7 gap-1 mb-1 text-xs text-ink/40 text-center">
+          {["Δε", "Τρ", "Τε", "Πε", "Πα", "Σα", "Κυ"].map((d) => <div key={d} className="py-1">{d}</div>)}
+        </div>
+        {monthGrid(calMonth).map((week, wi) => (
+          <div key={wi} className="grid grid-cols-7 gap-1 mb-1">
+            {week.map((dateISO, di) => {
+              if (!dateISO) return <div key={di} />;
+              const key = me.department === "Μονιάτης" ? `Μονιάτης (${calShift === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : me.department!;
+              const avail = calDays.find((d) => d.date === dateISO)?.byDept?.[key];
+              const dayNum = Number(dateISO.slice(8, 10));
+              const color = avail === undefined ? "text-ink/30" : avail > 0 ? "text-teal" : "text-brick";
+              const bg = avail === undefined ? "bg-ink/[0.02]" : avail > 0 ? "bg-teal/5" : "bg-brick/5";
+              return (
+                <div key={di} className={`aspect-square rounded-lg flex flex-col items-center justify-center ${bg}`}>
+                  <span className="text-[10px] text-ink/40">{dayNum}</span>
+                  <span className={`text-sm font-mono font-medium ${color}`}>{avail !== undefined ? Math.max(0, avail) : "—"}</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        <div className="text-xs text-ink/40 mt-3">Ο αριθμός δείχνει πόσα άτομα ακόμα μπορούν να πάρουν άδεια εκείνη τη μέρα.</div>
+      </div>
 
       <div className="grid sm:grid-cols-2 gap-3">
         <button onClick={() => setShowForm(true)} className="bg-teal text-white rounded-xl p-5 flex flex-col items-start justify-between hover:opacity-90 transition">

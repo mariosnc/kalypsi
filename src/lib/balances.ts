@@ -37,3 +37,7 @@ export const EMPLOYEE_TYPES = [
   { value: "PERMANENT", label: "Μόνιμος" },
   { value: "TWP", label: "Τ.Ω.Π." },
 ];
+
+// Μέγιστο απόθεμα Συσσωρευμένης άδειας (μεταφορά τέλους έτους)
+export const MAX_TWP_ACCUMULATED_HOURS = 334.4;
+export const MAX_PERMANENT_ACCUMULATED_DAYS = 100;

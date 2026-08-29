@@ -22,7 +22,7 @@ type EmployeeRow = {
   id: string; name: string; email: string; department: string | null; shiftGroup: string | null; shiftType: "DAY" | "NIGHT" | null;
   phone: string | null; qualifications: string[]; employeeType: "PERMANENT" | "TWP"; rank: string | null; role?: string;
   hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number;
-  daysLeave: number; daysDayOff: number;
+  daysLeave: number; daysDayOff: number; daysAccumulated: number;
 };
 type AbsenceRow = { id: string; department: string; type: "DOCTOR" | "TRAINING"; count: number; startDate: string; endDate: string };
 type ShiftCycleRow = { department: string; groups: string[]; workingGroup: string };
@@ -128,6 +128,7 @@ export default function AdminPage() {
   const [adjustAmt, setAdjustAmt] = useState<Record<string, string>>({});
   const [adjustCat, setAdjustCat] = useState<Record<string, string>>({});
   const [resetMsg, setResetMsg] = useState<Record<string, string>>({});
+  const [rolloverMsg, setRolloverMsg] = useState("");
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
@@ -170,6 +171,7 @@ export default function AdminPage() {
   const [newHoursAccumulated, setNewHoursAccumulated] = useState("0");
   const [newDaysLeave, setNewDaysLeave] = useState("20");
   const [newDaysDayOff, setNewDaysDayOff] = useState("0");
+  const [newDaysAccumulated, setNewDaysAccumulated] = useState("0");
   const [newRole, setNewRole] = useState<"EMPLOYEE" | "ADMIN">("EMPLOYEE");
   const [newStaffMember, setNewStaffMember] = useState(true);
   const [newFinalApprover, setNewFinalApprover] = useState(false);
@@ -342,7 +344,8 @@ export default function AdminPage() {
       setSchedulingKey(r.department === "Μονιάτης" ? `Μονιάτης (${r.shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : r.department);
     }
     loadSchedulingCoverage(schedulingMonth);
-  }, [tab, schedulingMonth, rules, schedulingKey, loadSchedulingCoverage]);
+    loadEmployees();
+  }, [tab, schedulingMonth, rules, schedulingKey, loadSchedulingCoverage, loadEmployees]);
   useEffect(() => { if (tab === "admins") loadAdmins(); }, [tab, loadAdmins]);
   useEffect(() => { if (tab === "myleave") loadMyRequests(); }, [tab, loadMyRequests]);
   useEffect(() => { setNewGroup(groupsForDepartment(newDept)[0] || ""); }, [newDept]);
@@ -399,6 +402,18 @@ export default function AdminPage() {
     const res = await fetch(`/api/users/${id}/reset-password`, { method: "POST" });
     const data = await res.json().catch(() => ({}));
     setResetMsg((m) => ({ ...m, [id]: res.ok ? `Νέος κωδικός: ${data.newPassword}` : data.error || "Σφάλμα" }));
+  }
+
+  async function runRollover() {
+    if (!confirm("Σίγουρα θέλεις να εκτελέσεις τη μεταφορά αδειών τέλους έτους για όλο το προσωπικό; Δεν αναιρείται.")) return;
+    const res = await fetch("/api/admin/rollover", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setRolloverMsg(data.error || "Σφάλμα.");
+      return;
+    }
+    setRolloverMsg(`Ολοκληρώθηκε: ${data.permanentCount} Μόνιμοι, ${data.twpCount} Τ.Ω.Π.`);
+    loadAdmins();
   }
 
   function updateEdit(id: string, field: string, value: any) {
@@ -461,7 +476,7 @@ export default function AdminPage() {
         name: newName, email: newEmail, password: newPassword, department: newDept, shiftGroup: newGroup,
         phone: newPhone, rank: newRank, employeeType: newEmpType, qualifications: newQuals, role: newRole,
         hoursOvertime: newHoursOvertime, hoursHolidays: newHoursHolidays, hoursAnnual: newHoursAnnual, hoursAccumulated: newHoursAccumulated,
-        daysLeave: newDaysLeave, daysDayOff: newDaysDayOff,
+        daysLeave: newDaysLeave, daysDayOff: newDaysDayOff, daysAccumulated: newDaysAccumulated,
         staffMember: newRole === "ADMIN" ? newStaffMember : true,
         finalApprover: newRole === "ADMIN" ? newFinalApprover : false,
       }),
@@ -787,6 +802,44 @@ export default function AdminPage() {
             ))}
             <div className="text-xs text-ink/40 mt-3">Ο αριθμός σε κάθε ημέρα δείχνει πόσα άτομα ακόμα μπορούν να πάρουν άδεια χωρίς να πέσει η κάλυψη κάτω από το ελάχιστο.</div>
           </div>
+
+          <div className="bg-white rounded-xl border border-ink/10 p-5">
+            <div className="font-disp text-xl mb-1">Προτεινόμενοι για άδεια</div>
+            <div className="text-sm text-ink/50 mb-4">
+              Για το «{schedulingKey}», με βάση το μεγαλύτερο απόθεμα αδειών και τη διαθεσιμότητα του μήνα.
+            </div>
+            {(() => {
+              const dept = schedulingKey.startsWith("Μονιάτης") ? "Μονιάτης" : schedulingKey;
+              const daysWithRoom = schedulingDays.filter((d) => (d.byDept?.[schedulingKey] ?? 0) > 0).length;
+              const candidates = employees
+                .filter((e) => e.department === dept)
+                .map((e) => {
+                  const balance = e.employeeType === "PERMANENT" ? e.daysLeave + e.daysAccumulated : e.hoursOvertime + e.hoursHolidays + e.hoursAnnual + e.hoursAccumulated;
+                  const unit = e.employeeType === "PERMANENT" ? "ημέρες" : "ώρες";
+                  return { ...e, balance, unit };
+                })
+                .sort((a, b) => b.balance - a.balance)
+                .slice(0, 8);
+
+              if (daysWithRoom === 0) {
+                return <div className="text-sm text-ink/40">Δεν υπάρχει διαθεσιμότητα άδειας αυτόν τον μήνα για αυτή την επιλογή.</div>;
+              }
+              if (candidates.length === 0) {
+                return <div className="text-sm text-ink/40">Δεν βρέθηκε προσωπικό σε αυτό το τμήμα.</div>;
+              }
+              return (
+                <div className="space-y-2">
+                  <div className="text-xs text-ink/40 mb-1">{daysWithRoom} ημέρες με διαθεσιμότητα τον μήνα αυτό.</div>
+                  {candidates.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between text-sm border-b border-ink/5 py-2 last:border-0">
+                      <span>{c.rank} {c.name}</span>
+                      <span className="font-mono text-ink/60">{c.balance} {c.unit} διαθέσιμο</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
 
@@ -1037,7 +1090,7 @@ export default function AdminPage() {
                     ...rows.map((r) => {
                       const isPermanent = r.user.employeeType === "PERMANENT";
                       const bal = isPermanent
-                        ? `Άδεια ${r.user.daysLeave}ημ / Ημεραργία ${r.user.daysDayOff}ημ`
+                        ? `Άδεια ${r.user.daysLeave}ημ / Ημεραργία ${r.user.daysDayOff}ημ / Συσσ. ${r.user.daysAccumulated}ημ`
                         : `Σύνολο ${r.user.hoursOvertime + r.user.hoursHolidays + r.user.hoursAnnual + r.user.hoursAccumulated}ω`;
                       return [
                         r.user.name, r.user.department || "", fmt(r.startDate), fmt(r.endDate),
@@ -1082,7 +1135,7 @@ export default function AdminPage() {
                         <td className="py-2 text-ink/50 text-xs">{fmt(r.startDate)} – {fmt(r.endDate)}</td>
                         <td className="py-2 font-mono text-xs">{isPermanent ? `${r.days} ημέρες (${r.leaveType === "DAYOFF" ? "Ημεραργία" : "Άδεια"})` : `${r.hours} ώρες`}</td>
                         <td className="py-2 font-mono text-xs text-ink/50">
-                          {isPermanent ? `Άδεια ${r.user.daysLeave}ημ / Ημεραργία ${r.user.daysDayOff}ημ` : `${r.user.hoursOvertime + r.user.hoursHolidays + r.user.hoursAnnual + r.user.hoursAccumulated}ω`}
+                          {isPermanent ? `Άδεια ${r.user.daysLeave}ημ / Ημεραργία ${r.user.daysDayOff}ημ / Συσσ. ${r.user.daysAccumulated}ημ` : `${r.user.hoursOvertime + r.user.hoursHolidays + r.user.hoursAnnual + r.user.hoursAccumulated}ω`}
                         </td>
                       </tr>
                     );
@@ -1113,7 +1166,7 @@ export default function AdminPage() {
                       <div className="font-medium">{e.name} <span className="text-xs text-ink/40">· {e.rank} · {e.department}</span></div>
                       <div className="text-xs text-ink/40">{e.email} · {e.phone}</div>
                       {isPermanent ? (
-                        <div className="text-sm text-ink/50 font-mono">Άδεια: {e.daysLeave}ημ · Ημεραργία: {e.daysDayOff}ημ</div>
+                        <div className="text-sm text-ink/50 font-mono">Άδεια: {e.daysLeave}ημ · Ημεραργία: {e.daysDayOff}ημ · Συσσ.: {e.daysAccumulated}ημ</div>
                       ) : (
                         <div className="text-sm text-ink/50 font-mono">Σύνολο: {e.hoursOvertime + e.hoursHolidays + e.hoursAnnual + e.hoursAccumulated} ώρες</div>
                       )}
@@ -1191,7 +1244,8 @@ export default function AdminPage() {
                             {isPermanent ? (
                               <>
                                 <option value="DAYS_LEAVE">Άδεια (ημέρες)</option>
-                                <option value="DAYS_DAYOFF">Ημεραργία (ημέρες)</option>
+                                <option value="DAYS_DAYOFF">Ημεραργία / R.D. (ημέρες)</option>
+                                <option value="DAYS_ACCUMULATED">Συσσωρευμένη (ημέρες)</option>
                               </>
                             ) : (
                               <>
@@ -1395,6 +1449,17 @@ export default function AdminPage() {
               </div>
             ))}
             {adminsList.length === 0 && <div className="p-4 text-sm text-ink/40">Φόρτωση...</div>}
+          </div>
+
+          <div className="bg-white rounded-xl border border-ink/10 p-5 space-y-3">
+            <div className="font-disp text-lg">Μεταφορά αδειών τέλους έτους</div>
+            <div className="text-sm text-ink/50">
+              Για τους Μόνιμους: η αχρησιμοποίητη Άδεια μεταφέρεται στη Συσσωρευμένη (μέγιστο απόθεμα 100 ημέρες) και μηδενίζεται. Η Ημεραργία/R.D. δεν μεταφέρεται.<br />
+              Για τους Τ.Ω.Π.: το αχρησιμοποίητο Έτους μεταφέρεται στη Συσσωρευμένη (μέγιστο απόθεμα 334.40 ώρες) και μηδενίζεται. Οι Υπερωρίες δεν μεταφέρονται.
+            </div>
+            <button onClick={runRollover} className="bg-brick text-white rounded-lg px-4 py-2 text-sm font-medium">Εκτέλεση μεταφοράς τώρα</button>
+            {rolloverMsg && <div className="text-sm text-teal">{rolloverMsg}</div>}
+            <div className="text-xs text-ink/40">⚠️ Αυτή η ενέργεια επηρεάζει όλο το προσωπικό ταυτόχρονα και δεν αναιρείται — κάνε την μία φορά, στην αρχή του νέου έτους.</div>
           </div>
         </div>
       )}
@@ -1612,8 +1677,12 @@ export default function AdminPage() {
                     <input type="number" value={newDaysLeave} onChange={(e) => setNewDaysLeave(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
                   </label>
                   <label className="text-sm">
-                    <div className="text-ink/50 mb-1">Ημεραργία (ημέρες)</div>
+                    <div className="text-ink/50 mb-1">Ημεραργία / R.D. (ημέρες)</div>
                     <input type="number" value={newDaysDayOff} onChange={(e) => setNewDaysDayOff(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                  </label>
+                  <label className="text-sm">
+                    <div className="text-ink/50 mb-1">Συσσωρευμένη (ημέρες)</div>
+                    <input type="number" value={newDaysAccumulated} onChange={(e) => setNewDaysAccumulated(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
                   </label>
                 </div>
               ) : (

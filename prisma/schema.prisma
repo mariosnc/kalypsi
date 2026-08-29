@@ -32,6 +32,7 @@ enum BalanceCategory {
   ACCUMULATED
   DAYS_LEAVE
   DAYS_DAYOFF
+  DAYS_ACCUMULATED
 }
 
 enum SwapStatus {
@@ -70,14 +71,15 @@ model User {
   shiftType      ShiftType? // μόνο για Μονιάτης (Ημέρα/Νύχτα)
 
   // Τ.Ω.Π. — υπόλοιπα σε ώρες
-  hoursOvertime    Int @default(0) // Υπερωρίες
-  hoursHolidays    Int @default(0) // Αργίες
-  hoursAnnual      Int @default(0) // Έτους
-  hoursAccumulated Int @default(0) // Συσσωρευμένη
+  hoursOvertime    Float @default(0) // Υπερωρίες
+  hoursHolidays    Float @default(0) // Αργίες
+  hoursAnnual      Float @default(0) // Έτους
+  hoursAccumulated Float @default(0) // Συσσωρευμένη (μέγιστο απόθεμα 334.40 ώρες)
 
   // Μόνιμος — υπόλοιπα σε ημέρες
-  daysLeave  Int @default(0) // Άδεια
-  daysDayOff Int @default(0) // Ημεραργία
+  daysLeave       Int @default(0) // Άδεια
+  daysDayOff      Int @default(0) // Ημεραργία (R/D)
+  daysAccumulated Int @default(0) // Συσσωρευμένη (μέγιστο απόθεμα 100 ημέρες)
 
   createdAt DateTime @default(now())
 
