@@ -39,7 +39,7 @@ function sortByRankThenUsername<T extends { rank?: string | null; email: string 
     return a.email.localeCompare(b.email);
   });
 }
-const groupsForDepartment = (dept: string) => (dept === "Μονιάτης" ? ["Πράσινη", "Ερυθρά", "Κυανή", "Λευκή"] : ["Α", "Β"]);
+const groupsForDepartment = (dept: string) => (dept === "Μονιάτης" ? ["Πράσινη", "Ερυθρά", "Λευκή", "Κυανή"] : ["Α", "Β"]);
 const effectiveKey = (dept: string, shiftType?: string | null) =>
   dept === "Μονιάτης" ? `Μονιάτης (${shiftType === "NIGHT" ? "Νύχτα" : "Ημέρα"})` : dept;
 

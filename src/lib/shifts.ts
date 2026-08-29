@@ -1,5 +1,5 @@
 // Ομάδες βάρδιας ανά τμήμα
-export const MONIATIS_GROUPS = ["Πράσινη", "Ερυθρά", "Κυανή", "Λευκή"];
+export const MONIATIS_GROUPS = ["Πράσινη", "Ερυθρά", "Λευκή", "Κυανή"];
 export const DEFAULT_GROUPS = ["Α", "Β"];
 
 export function groupsForDepartment(dept: string): string[] {
