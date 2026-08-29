@@ -9,7 +9,7 @@ import {
 
 type PendingReq = {
   id: string; startDate: string; endDate: string; hours: number; days?: number | null; leaveType?: string | null; shiftType?: string | null; status: string;
-  user: { id: string; name: string; department: string | null; employeeType: string; hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number; daysLeave: number; daysDayOff: number };
+  user: { id: string; name: string; department: string | null; employeeType: string; hoursOvertime: number; hoursHolidays: number; hoursAnnual: number; hoursAccumulated: number; daysLeave: number; daysDayOff: number; daysAccumulated: number };
 };
 type RosterRow = {
   id: string; name: string; email: string; department: string | null; rank: string | null;
