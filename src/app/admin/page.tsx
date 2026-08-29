@@ -1168,7 +1168,10 @@ export default function AdminPage() {
                       {isPermanent ? (
                         <div className="text-sm text-ink/50 font-mono">Άδεια: {e.daysLeave}ημ · Ημεραργία: {e.daysDayOff}ημ · Συσσ.: {e.daysAccumulated}ημ</div>
                       ) : (
-                        <div className="text-sm text-ink/50 font-mono">Σύνολο: {e.hoursOvertime + e.hoursHolidays + e.hoursAnnual + e.hoursAccumulated} ώρες</div>
+                        <div className="text-sm text-ink/50 font-mono">
+                          Υπερ.: {e.hoursOvertime}ω · Αργίες: {e.hoursHolidays}ω · Έτους: {e.hoursAnnual}ω · Συσσ.: {e.hoursAccumulated}ω
+                          <span className="text-ink/70 font-medium"> · Σύνολο: {e.hoursOvertime + e.hoursHolidays + e.hoursAnnual + e.hoursAccumulated}ω</span>
+                        </div>
                       )}
                     </div>
                     <button onClick={() => setExpandedEmp(expanded ? null : e.id)} className="no-print text-sm text-ink/50 flex items-center gap-1">
@@ -1256,7 +1259,7 @@ export default function AdminPage() {
                               </>
                             )}
                           </select>
-                          <input type="number" placeholder="+/-" value={adjustAmt[e.id] || ""} onChange={(ev) => setAdjustAmt((a) => ({ ...a, [e.id]: ev.target.value }))}
+                          <input type="number" step="0.5" placeholder="+/-" value={adjustAmt[e.id] || ""} onChange={(ev) => setAdjustAmt((a) => ({ ...a, [e.id]: ev.target.value }))}
                             className="w-24 border border-ink/15 rounded-lg px-2 py-1.5 text-sm font-mono" />
                           <button onClick={() => applyAdjust(e.id)} className="text-sm px-3 py-1.5 rounded-lg bg-teal text-white">Εφαρμογή</button>
                         </div>
@@ -1674,15 +1677,15 @@ export default function AdminPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-sm">
                     <div className="text-ink/50 mb-1">Άδεια (ημέρες)</div>
-                    <input type="number" value={newDaysLeave} onChange={(e) => setNewDaysLeave(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                    <input type="number" step="0.5" value={newDaysLeave} onChange={(e) => setNewDaysLeave(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
                   </label>
                   <label className="text-sm">
                     <div className="text-ink/50 mb-1">Ημεραργία / R.D. (ημέρες)</div>
-                    <input type="number" value={newDaysDayOff} onChange={(e) => setNewDaysDayOff(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                    <input type="number" step="0.5" value={newDaysDayOff} onChange={(e) => setNewDaysDayOff(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
                   </label>
                   <label className="text-sm">
                     <div className="text-ink/50 mb-1">Συσσωρευμένη (ημέρες)</div>
-                    <input type="number" value={newDaysAccumulated} onChange={(e) => setNewDaysAccumulated(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
+                    <input type="number" step="0.5" value={newDaysAccumulated} onChange={(e) => setNewDaysAccumulated(e.target.value)} className="w-full border border-ink/15 rounded-lg px-3 py-2" />
                   </label>
                 </div>
               ) : (

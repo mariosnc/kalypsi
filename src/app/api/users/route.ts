@@ -19,7 +19,7 @@ export async function GET() {
       phone: true, qualifications: true, employeeType: true, rank: true,
       staffMember: true, finalApprover: true,
       hoursOvertime: true, hoursHolidays: true, hoursAnnual: true, hoursAccumulated: true,
-      daysLeave: true, daysDayOff: true,
+      daysLeave: true, daysDayOff: true, daysAccumulated: true,
     },
   });
 
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     name, email, password, department, role, shiftGroup,
     phone, qualifications, employeeType, rank,
     hoursOvertime, hoursHolidays, hoursAnnual, hoursAccumulated,
-    daysLeave, daysDayOff, staffMember, finalApprover,
+    daysLeave, daysDayOff, daysAccumulated, staffMember, finalApprover,
   } = body;
 
   if (!name || !email || !password) {
@@ -101,8 +101,9 @@ export async function POST(req: NextRequest) {
       hoursHolidays: Math.round(Number(hoursHolidays || 0)),
       hoursAnnual: Math.round(Number(hoursAnnual || 0)),
       hoursAccumulated: Math.round(Number(hoursAccumulated || 0)),
-      daysLeave: Math.round(Number(daysLeave || 0)),
-      daysDayOff: Math.round(Number(daysDayOff || 0)),
+      daysLeave: Number(daysLeave || 0),
+      daysDayOff: Number(daysDayOff || 0),
+      daysAccumulated: Number(daysAccumulated || 0),
       role: finalRole,
     },
   });

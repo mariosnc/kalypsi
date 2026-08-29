@@ -77,9 +77,9 @@ model User {
   hoursAccumulated Float @default(0) // Συσσωρευμένη (μέγιστο απόθεμα 334.40 ώρες)
 
   // Μόνιμος — υπόλοιπα σε ημέρες
-  daysLeave       Int @default(0) // Άδεια
-  daysDayOff      Int @default(0) // Ημεραργία (R/D)
-  daysAccumulated Int @default(0) // Συσσωρευμένη (μέγιστο απόθεμα 100 ημέρες)
+  daysLeave       Float @default(0) // Άδεια
+  daysDayOff      Float @default(0) // Ημεραργία (R/D)
+  daysAccumulated Float @default(0) // Συσσωρευμένη (μέγιστο απόθεμα 100 ημέρες)
 
   createdAt DateTime @default(now())
 
