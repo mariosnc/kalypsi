@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { computeLeaveHours } from "@/lib/date";
-import { groupsForDepartment, defaultStartingGroup, dayNightGroups } from "@/lib/shifts";
+import { groupsForDepartment, defaultStartingGroup, dayNightGroups, visibleTeamPairs } from "@/lib/shifts";
 import { deductCascading } from "@/lib/balances";
 
 function inclusiveDayCount(startISO: string, endISO: string): number {
@@ -24,7 +24,17 @@ export async function GET(req: NextRequest) {
   const mine = req.nextUrl.searchParams.get("mine") === "1";
 
   const where: any = {};
-  if (session.role !== "ADMIN" || mine) where.userId = session.sub;
+  if (session.role !== "ADMIN" || mine) {
+    where.userId = session.sub;
+  } else {
+    // Κανονικοί διαχειριστές (όχι τελικής έγκρισης) βλέπουν μόνο τις αιτήσεις της δικής τους ομάδας —
+    // και, αν είναι στον Αγρό ή στο Πελένδρι, και το αντίστοιχο ζευγάρι με το ίδιο γράμμα ομάδας.
+    const admin = await prisma.user.findUnique({ where: { id: session.sub } });
+    if (admin && !admin.finalApprover && admin.staffMember && admin.department && admin.shiftGroup && admin.department !== "Μονιάτης") {
+      const pairs = visibleTeamPairs(admin.department, admin.shiftGroup);
+      where.OR = pairs.map((p) => ({ user: { department: p.department, shiftGroup: p.shiftGroup } }));
+    }
+  }
   if (status) where.status = status;
 
   const requests = await prisma.leaveRequest.findMany({

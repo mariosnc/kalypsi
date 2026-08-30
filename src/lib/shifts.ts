@@ -45,3 +45,18 @@ export function dayNightGroups(
   const nightIdx = computeWorkingGroupIndex(anchorDate, anchorGroupIndex, yesterday, groups.length);
   return { dayGroup: groups[dayIdx], nightGroup: groups[nightIdx] };
 }
+
+// Ο Αγρός και το Πελένδρι δουλεύουν μαζί στο ημερήσιο καθήκον (ίδιο γράμμα ομάδας = ίδια βάρδια)
+const LINKED_DEPARTMENTS: Record<string, string> = {
+  "Αγρός": "Πελένδρι",
+  "Πελένδρι": "Αγρός",
+};
+
+// Ποια τμήμα/ομάδα (department, shiftGroup) πρέπει να βλέπει ένας διαχειριστής που ανήκει ο ίδιος
+// σε συγκεκριμένο τμήμα/ομάδα: το δικό του, και αν είναι Αγρός/Πελένδρι, και το αντίστοιχο ζευγάρι.
+export function visibleTeamPairs(department: string, shiftGroup: string): { department: string; shiftGroup: string }[] {
+  const pairs = [{ department, shiftGroup }];
+  const linked = LINKED_DEPARTMENTS[department];
+  if (linked) pairs.push({ department: linked, shiftGroup });
+  return pairs;
+}

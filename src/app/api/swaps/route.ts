@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { visibleTeamPairs } from "@/lib/shifts";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -11,6 +12,13 @@ export async function GET(req: NextRequest) {
   const where: any = {};
   if (session.role !== "ADMIN") {
     where.OR = [{ requesterId: session.sub }, { colleagueId: session.sub }];
+  } else {
+    // Κανονικοί διαχειριστές (όχι τελικής έγκρισης) βλέπουν μόνο ανταλλαγές που αφορούν τη δική τους ομάδα
+    const admin = await prisma.user.findUnique({ where: { id: session.sub } });
+    if (admin && !admin.finalApprover && admin.staffMember && admin.department && admin.shiftGroup && admin.department !== "Μονιάτης") {
+      const pairs = visibleTeamPairs(admin.department, admin.shiftGroup);
+      where.requester = { OR: pairs.map((p) => ({ department: p.department, shiftGroup: p.shiftGroup })) };
+    }
   }
   if (statusFilter) where.status = statusFilter;
 
